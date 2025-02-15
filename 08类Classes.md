@@ -833,9 +833,678 @@ endclass
 
 当使用参数化类名称作为前缀时，类解析运算符具有特殊规则；有关详细信息，请参见 8.25.1。
 
+## 8.24 块外声明
+将方法定义移出类声明体是方便的。这是通过两个步骤完成的。首先，在类体内，声明方法原型，即它是函数还是任务、任何限定符（`local` 、`protected` 或 `virtual`）以及完整的参数规定加上 `extern` 限定符。`extern` 限定符表示方法的实现可以在声明之外找到。其次，在类声明体外，声明完整的方法（例如，原型但不包括限定符），并将方法名称限定为类名和一对冒号，如下所示：
+```verilog
+class Packet;
+    Packet next;
+    function Packet get_next();// 单行
+        get_next = next;
+    endfunction
 
+    // 块外（extern）声明
+    extern protected virtual function int send(int value);
+endclass
 
+function int Packet::send(int value);
+    // 删除保护虚拟，添加 Packet::
+    // 方法体
+    ...
+endfunction
+```
 
+块外方法声明应与原型声明完全匹配，以下情况除外：
+ - 方法名称前面加上类名和类作用域解析运算符。
+ - 函数返回类型可能还需要在块外声明中添加类作用域，如下所述。
+ - 在原型中指定的默认参数值可能在块外声明中省略。如果在块外声明中指定了默认参数值，则原型中应有一个语法上相同的默认参数值。
 
+块外声明应在类声明的相同作用域中声明，并应跟随类声明。如果为特定 `extern` 方法提供了多个块外声明，则会报告错误。
 
+在某些情况下，需要使用类解析运算符来命名方法的返回类型。当块外声明的返回类型在类内部定义时，应使用作用域解析运算符来指示内部返回类型。
 
+```verilog
+typedef real T;
+
+class C;
+    extern function T f();
+    extern function real f2();
+endclass
+
+function C::T C::f(); // 返回必须使用作用域解析
+    return 1;
+endfunction
+
+function real C::f2();
+    return 1.0;
+endfunction
+```
+
+块外方法声明应能够访问类中声明的所有声明。按照正常解析规则，如果类类型在原型之前声明，则原型可以访问类类型。如果原型中引用的标识符未解析为与块外方法声明头部解析的相同声明，则将报告错误。
+
+```verilog
+typedef int T;
+class C;
+    extern function void f(T x);
+    typedef real T;
+endclass
+
+function void C::f(T x);
+endfunction
+```
+
+在此示例中，原型方法 f 中的标识符 T 解析为外部范围中的 T 声明。在方法 f 的块外声明中，标识符 T 解析为 C::T，因为块外声明对类 C 中的所有类型都有可见性。由于块外声明中的 T 解析与原型中的解析不匹配，将报告错误。
+
+## 8.25 参数化类
+通常，定义一个通用类，其对象可以实例化为具有不同的数组大小或数据类型是有用的。这样可以避免为每个大小或类型编写类似的代码，并允许使用单个规范来实例化根本不同的对象，并且（与 C++ 中的模板类一样）不可互换。
+
+SystemVerilog 参数机制用于参数化类：
+```verilog
+class vector #(int size = 1);
+    bit [size-1:0] a;
+endclass
+```
+
+然后可以像模块或接口一样实例化此类：
+```verilog
+vector #(10) vten; // 大小为 10 的对象
+vector #(.size(2)) vtwo; // 大小为 2 的对象
+typedef vector#(4) Vfour; // 大小为 4 的类
+```
+
+当使用类型作为参数时，这个特性尤其有用：
+```verilog
+class stack #(type T = int);
+    local T items[];
+    task push( T a ); ... endtask
+    task pop( ref T a ); ... endtask
+endclass
+```
+
+上面的类定义了一个通用 *堆栈* 类，可以实例化为任意类型：
+```verilog
+stack is; // 默认：int 堆栈
+stack#(bit[1:10]) bs; // 10 位向量堆栈
+stack#(real) rs; // 实数堆栈
+```
+
+任何类型都可以作为参数提供，包括用户定义的类型，如 `class` 或 `struct`。
+
+类的组合和实际参数值的组合称为 *特化*。类的每个特化都有一组独特的 `static` 成员变量（这与 C++ 模板类一致）。要在多个类特化之间共享静态成员变量，它们应该放在一个非参数化的基类中。
+```verilog
+class vector #(int size = 1);
+    bit [size-1:0] a;
+    static int count = 0;
+    function void disp_count();
+        $display( "count: %d of size %d", count, size );
+    endfunction
+endclass
+```
+
+在上面的示例中，变量 count 只能通过相应的 disp_count 方法访问。类 vector 的每个特化都有其自己独特的 count 副本。
+
+特化是特定的通用类与一组唯一参数的组合。两组参数应该是唯一的，除非所有参数都相同，如下所示：
+ - 参数是类型参数，两个类型是匹配类型。
+ - 参数是值参数，它们的类型和值都相同。
+
+特定通用类的所有匹配特化应该表示相同的类型。通用类的匹配特化集由类声明的上下文定义。因为包中的通用类在整个系统中可见，包中通用类的所有匹配特化都是相同的类型。在其他上下文中，如模块或程序，包含通用类声明的作用域的每个实例都创建一个唯一的通用类，从而定义新的匹配特化集。
+
+通用类不是类型；只有具体特化代表类型。在上面的示例中，类 vector 只有在应用参数后才成为具体类型，例如：
+```verilog
+typedef vector#(4) Vfour; // 使用默认大小 4
+vector#(6) vx; // 使用大小 6
+```
+
+为了避免重复特化的声明或创建该类型的参数，应该使用 `typedef`：
+```verilog
+typedef vector#(4) Vfour;
+typedef stack#(Vfour) Stack4;
+Stack4 s1, s2; // 声明 Stack4 类型的对象
+```
+
+参数化类可以扩展另一个参数化类。例如：
+```verilog
+class C #(type T = bit); ... endclass // 基类
+class D1 #(type P = real) extends C; // T 是 bit（默认）
+class D2 #(type P = real) extends C #(integer); // T 是 integer
+class D3 #(type P = real) extends C #(P); // T 是 P
+class D4 #(type P = C#(real)) extends P; // 对于默认 T 是 real
+```
+
+类 D1 使用基类 C 扩展基类的默认类型（bit）参数。类 D2 使用整数参数扩展基类 C。类 D3 使用参数化类型（P）扩展基类 C。类 D4 使用类型参数 P 扩展指定的基类。
+
+当类型参数或 typedef 名称用作基类时，如上面的类 D4，名称应在展开后解析为类类型。
+
+参数化类的默认特化是将参数化类与空参数覆盖列表的特化。对于参数化类 C，默认特化是 `C#()`。除非作为作用域解析运算符的前缀，使用未装饰的参数化类的名称应表示类的默认特化。不是所有参数化类都有默认特化，因为类可能不提供参数默认值。在这种情况下，所有特化应该至少覆盖那些没有默认值的参数。
+
+示例：
+```verilog
+class C #(int p = 1);
+...
+endclass
+
+class D #(int p);
+...
+endclass
+
+C obj; // 合法；等同于 "C#() obj";
+D obj; // 非法；D 没有默认特化
+```
+
+### 8.25.1 参数化类的类解析运算符
+有前缀的类解析运算符即参数化类的未装饰名称（参见 8.25）应该限制在命名参数化类的范围内以及在其块外声明内（参见 8.24）使用。在这种情况下，未装饰的参数化类名称不表示默认特化，而是用于明确引用参数化类的成员。当引用默认特化作为类解析运算符的前缀时，应使用显式默认特化形式 `#()`。
+
+参数化类外的上下文或其块外声明之外的上下文中，类解析运算符可以用于访问任何类参数。在这种上下文中，应使用显式特化形式；未装饰的参数化类名称是非法的。显式特化形式可以表示特定参数或默认特化形式。类解析运算符可以访问作为类的本地参数或参数的值和类型参数。
+
+示例：
+```verilog
+class C #(int p = 1);
+    parameter int q = 5; // 本地参数
+    static task t;
+        int p;
+        int x = C::p; // C::p 消除歧义  // C::p 不是默认特化中的 p
+    endtask
+endclass
+
+int x = C::p; // 非法；在此上下文中不允许 C::
+int y = C#()::p; // 合法；引用 C 的默认特化中的参数 p
+typedef C T; // T 是默认特化，不是别名
+int z = T::p; // 合法；T::p 引用默认特化中的 p
+int v = C#(3)::p; // 合法；引用 C#(3) 中的参数 p
+int w = C#()::q; // 合法；引用本地参数
+T obj = new();
+int u = obj.q; // 合法；引用本地参数
+bit arr[obj.q]; // 非法：本地参数不是常量表达式
+```
+
+在参数化类方法的块外声明上下文中，使用类作用域解析运算符应该是对类内部的名称的引用，就好像在参数化类内部引用一样；不暗示特化。
+
+示例：
+```verilog
+class C #(int p = 1, type T = int);
+    extern static function T f();
+endclass
+
+function C::T C::f();
+    return p + C::p;
+endfunction
+
+initial $display("%0d %0d", C#()::f(),C#(5)::f()); // 输出是 "2 10"
+```
+
+## 8.26 接口类
+可以创建一组类，这些类可以被视为都具有一组共同的行为。这样的一组共同的行为可以使用 *接口类* 来创建。接口类使得相关类不需要共享一个公共的抽象超类，或者超类需要包含所有子类所需的所有方法定义。非接口类可以声明为实现一个或多个接口类。这为非接口类提供了一组方法定义，这些方法定义应满足虚方法覆盖的要求（参见 8.20）。
+
+`interface class` 只能包含纯虚方法（参见 8.21）、类型声明（参见 6.18）和参数声明（参见 6.20，8.25）。约束块、覆盖组和嵌套类（参见 8.23）不允许在接口类中。接口类不得嵌套在另一个类中。接口类可以通过 `extends` 关键字继承一个或多个接口类，这意味着它继承了它扩展的接口类的所有成员类型、纯虚方法和参数，除了它可能隐藏的任何成员类型和参数。在多重继承的情况下，可能会发生名称冲突，必须解决（参见 8.26.6）。
+
+类可以通过 `implements` 关键字实现一个或多个接口类。通过 `implements` 关键字实现的接口类不继承任何成员类型或参数。子类隐式实现其超类实现的所有接口类。在下面的示例中，类 C 隐式实现接口类 A，并具有所有要求和功能，就好像它显式实现接口类 A 一样：
+```verilog
+interface class A;
+endclass
+
+class B implements A;
+endclass
+
+class C extends B;
+endclass
+```
+
+接口类的每个纯虚方法应该有一个虚方法实现，以便被非抽象类实现。当接口类由类实现时，接口类方法的必需实现可以由继承的虚方法实现提供。`virtual class` 应该为每个实现的 `virtual class` 的纯虚方法原型或虚方法实现定义或继承。应使用关键字 `virtual`，除非继承了虚方法。
+
+变量的声明类型为接口类类型时，其声明类型的值可以是实现指定接口类的任何类的实例的引用（参见 8.22）。仅仅因为一个类为接口类的所有纯虚方法提供了实现并不足够；该类或其一个超类应该通过 `implements` 关键字声明为实现接口类，否则该类不实现接口类。
+
+以下是接口类的简单示例。
+```verilog
+interface class PutImp#(type PUT_T = logic);
+    pure virtual function void put(PUT_T a);
+endclass
+
+interface class GetImp#(type GET_T = logic);
+    pure virtual function GET_T get();
+endclass
+class Fifo#(type T = logic, int DEPTH=1) implements PutImp#(T), GetImp#(T);
+    T myFifo [$:DEPTH-1];
+    virtual function void put(T a);
+        myFifo.push_back(a);
+    endfunction
+    virtual function T get();
+        get = myFifo.pop_front();
+    endfunction
+endclass
+
+class Stack#(type T = logic, int DEPTH=1) implements PutImp#(T), GetImp#(T);
+    T myFifo [$:DEPTH-1];
+    virtual function void put(T a);
+        myFifo.push_front(a);
+    endfunction
+    virtual function T get();
+        get = myFifo.pop_front();
+    endfunction
+endclass
+```
+
+例子中有两个接口类 PutImp 和 GetImp，它们包含原型纯虚方法 put 和 get。Fifo 和 Stack 类使用关键字 `implements` 来实现 PutImp 和 GetImp 接口类，并为 put 和 get 提供实现。这些类因此共享共同的行为，而不共享共同的实现。
+
+### 8.26.1 接口类语法
+---
+```verilog
+interface_class_declaration ::= // from A.1.2
+interface class class_identifier [ parameter_port_list ] 
+[ extends interface_class_type { , interface_class_type } ] ;
+{ interface_class_item } 
+endclass [ : class_identifier] 
+interface_class_item ::= 
+type_declaration 
+| { attribute_instance } interface_class_method 
+| local_parameter_declaration ;
+| parameter_declaration7 ;
+| ;
+interface_class_method ::= 
+pure virtual method_prototype ;
+// 7) 在作为 class_item 的 parameter_declaration 中，parameter 关键字应当是 localparam 关键字的同义词。
+```
+---
+语法 8-3 接口类语法（摘自附录 A）
+
+### 8.26.2 extends 对比 implements
+概念上，`extends` 是一种机制，用于向超类添加或修改行为，而 `implements` 是要求为接口类中的纯虚方法提供实现。当一个类被扩展时，类的所有成员都被继承到子类中。当一个接口类被实现时，没有任何成员被继承。
+
+接口类可以扩展，但不实现，一个或多个接口类，这意味着接口子类从多个接口类中继承成员，并可以添加额外的成员类型、纯虚方法原型和参数。一个类或虚类可以实现，但不扩展，一个或多个接口类。因为虚类是抽象的，它不需要完全定义来实现其实现类的方法（参见 8.26.7）。以下是这些区别的重点：
+ - 一个接口类
+   - 可以扩展零个或多个接口类
+   - 不能实现接口类
+   - 不能扩展类或虚类
+   - 不能实现类或虚类
+ - 一个类或虚类
+   - 不能扩展接口类
+   - 可以实现零个或多个接口类
+   - 最多可以扩展一个其他类或虚类
+   - 不能实现类或虚类
+   - 可以同时扩展一个类和实现接口类
+
+在下面的示例中，一个类既扩展一个基类，又实现两个接口类：
+```verilog
+interface class PutImp#(type PUT_T = logic);
+    pure virtual function void put(PUT_T a);
+endclass
+
+interface class GetImp#(type GET_T = logic);
+    pure virtual function GET_T get();
+endclass
+
+class MyQueue #(type T = logic, int DEPTH = 1);
+    T PipeQueue[$:DEPTH-1];
+    virtual function void deleteQ();
+        PipeQueue.delete();
+    endfunction
+endclass
+
+class Fifo #(type T = logic, int DEPTH = 1)
+    extends MyQueue#(T, DEPTH)
+    implements PutImp#(T), GetImp#(T);
+    virtual function void put(T a);
+        PipeQueue.push_back(a);
+    endfunction
+    virtual function T get();
+        get = PipeQueue.pop_front();
+    endfunction
+endclass
+```
+
+在这个例子中，PipeQueue 属性和 deleteQ 方法被 Fifo 类继承。此外，Fifo 类还实现了 PutImp 和 GetImp 接口类，因此应为 put 和 get 方法提供实现。
+
+下面的示例演示了多个类型可以在类定义中进行参数化，并且解析的类型用于实现的 PutImp 和 GetImp 接口类。
+```verilog
+virtual class XFifo#(type T_in = logic, type T_out = logic, int DEPTH = 1)
+                     extends MyQueue#(T_out)
+                     implements PutImp#(T_in), GetImp#(T_out);
+    pure virtual function T_out translate(T_in a);
+    virtual function void put(T_in a);
+        PipeQueue.push_back(translate(a));
+    endfunction
+    virtual function T_out get();
+        get = PipeQueue.pop_front();
+    endfunction
+endclass
+```
+
+继承的虚方法可以为实现的接口类的方法提供实现。下面是一个例子：
+```verilog
+interface class IntfClass;
+    pure virtual function bit funcBase();
+    pure virtual function bit funcExt();
+endclass
+
+class BaseClass;
+    virtual function bit funcBase();
+        return (1);
+    endfunction
+endclass
+
+class ExtClass extends BaseClass implements IntfClass;
+    virtual function bit funcExt();
+        return (0);
+    endfunction
+endclass
+```
+
+ExtClass 通过提供 funcExt 的实现来实现 IntfClass 的要求，并通过从 BaseClass 继承 funcBase 的实现来实现 IntfClass 的要求。
+
+非虚方法不提供对实现的接口类方法的实现。
+```verilog
+interface class IntfClass;
+    pure virtual function void f();
+endclass
+
+class BaseClass;
+    function void f();
+        $display("Called BaseClass::f()");
+    endfunction
+endclass
+
+class ExtClass extends BaseClass implements IntfClass;
+    virtual function void f();
+        $display("Called ExtClass::f()");
+    endfunction
+endclass
+```
+
+BaseClass 中的非虚函数 f() 不满足实现 IntfClass 的要求。ExtClass 中 f() 的实现同时隐藏了 BaseClass 中的 f() 并满足实现 IntfClass 的要求。
+
+### 8.26.3 类型访问
+接口类中的参数和 typedef 通过扩展的接口类继承，但不通过实现的接口类继承。参数和 typedef 在接口类中是静态的，并且可以通过类作用域解析运算符 :: （见 8.23）访问。不能通过接口类选择（点引用）访问接口类参数。
+
+例1：类型和参数声明通过 extends 继承
+```verilog
+interface class IntfA #(type T1 = logic);
+    typedef T1[1:0] T2;
+    pure virtual function T2 funcA();
+endclass : IntfA
+
+interface class IntfB #(type T = bit) extends IntfA #(T);
+    pure virtual function T2 funcB(); // 合法，类型 T2 被继承
+endclass : IntfB
+```
+
+例2：类型和参数声明不通过 implements 继承，必须使用类作用域解析运算符
+```verilog
+interface class IntfC;
+    typedef enum {ONE, TWO, THREE} t1_t;
+    pure virtual function t1_t funcC();
+endclass : IntfC
+
+class ClassA implements IntfC;
+    t1_t t1_i; // 错误，t1_t 没有从 IntfC 继承
+    virtual function IntfC::t1_t funcC(); // 正确
+        return (IntfC::ONE); // 正确
+    endfunction : funcC
+endclass : ClassA
+```
+
+### 8.26.4 类型使用限制
+类不能实现类型参数，接口类也不能扩展类型参数，即使类型参数解析为接口类。以下例子说明了这一限制，并且是非法的：
+```verilog
+class Fifo #(type T = PutImp) implements T;
+virtual class Fifo #(type T = PutImp) implements T;
+interface class Fifo #(type T = PutImp) extends T;
+```
+
+类不能为接口类实现前向类型定义。接口类不能从接口类的前向类型定义扩展。接口类必须在实现或扩展之前声明。
+```verilog
+typedef interface class IntfD;
+
+class ClassB implements IntfD #(bit); // 非法
+    virtual function bit[1:0] funcD();
+endclass : ClassB
+
+// 接口类声明必须在 ClassB 之前
+interface class IntfD #(type T1 = logic);
+    typedef T1[1:0] T2;
+    pure virtual function T2 funcD();
+endclass : IntfD
+```
+
+### 8.26.5 类型转换和对象引用赋值
+把对象句柄赋值给对象实现的接口类类型变量是合法的。
+```verilog
+class Fifo #(type T = int) implements PutImp#(T), GetImp#(T);
+endclass
+Fifo#(int) fifo_obj = new;
+PutImp#(int) put_ref = fifo_obj;
+```
+
+在接口类变量之间动态类型转换是合法的，如果实际类句柄对于要赋值的目标是合法的。
+```verilog
+GetImp#(int) get_ref;
+Fifo#(int) fifo_obj = new;
+PutImp#(int) put_ref = fifo_obj;
+$cast(get_ref, put_ref);
+```
+
+在上面的例子中，put_ref 是一个实现 GetImp#(int) 的 Fifo#(int) 实例。从对象句柄到接口类类型句柄的转换也是合法的。
+```verilog
+$cast(fifo_obj, put_ref); // 合法
+$cast(put_ref, fifo_obj); // 合法，但不需要转换
+```
+
+与抽象类一样，接口类类型的对象不应该被构造。
+```verilog
+put_ref = new(); // 非法
+```
+
+从空源接口类句柄进行转换的处理方式与从空源类句柄进行转换的处理方式相同（参见 8.16）。
+
+### 8.26.6 名称冲突和解决
+当一个类实现多个接口类时，或者一个接口类扩展多个接口类时，来自不同名称空间的标识符被合并到一个单一的名称空间中。当这种情况发生时，可能会同时在单一名称空间中看到来自多个名称空间的相同标识符，从而创建一个必须解决的名称冲突。
+
+#### 8.26.6.1 方法名称冲突解决
+可能存在一个接口类继承多个方法，或者一个类被要求通过 `implements` 提供多个方法的实现，这些方法具有相同的名称。这是一个方法名称冲突。方法名称冲突应该通过一个单一的方法原型或实现来解决，同时为所有具有相同名称的纯虚方法提供一个实现。该方法原型或实现还必须是任何同名继承方法的有效虚方法覆盖。
+
+例如：
+```verilog
+interface class IntfBase1;
+    pure virtual function bit funcBase();
+endclass
+
+interface class IntfBase2;
+    pure virtual function bit funcBase();
+endclass
+
+virtual class ClassBase;
+    pure virtual function bit funcBase();
+endclass
+
+class ClassExt extends ClassBase implements IntfBase1, IntfBase2;
+    virtual function bit funcBase();
+        return (0);
+    endfunction
+endclass
+```
+
+类 ClassExt 提供了 funcBase 的实现，覆盖了来自 ClassBase 的纯虚方法原型，同时为来自 IntfBase1 和 IntfBase2 的 funcBase 提供实现。
+
+也有方法名称冲突不能解决的情况。
+
+例如：
+
+```verilog
+interface class IntfBaseA;
+    pure virtual function bit funcBase();
+endclass
+
+interface class IntfBaseB;
+    pure virtual function string funcBase();
+endclass
+
+class ClassA implements IntfBaseA, IntfBaseB;
+    virtual function bit funcBase();
+        return (0);
+    endfunction
+endclass
+```
+
+在这个情况下，funcBase 在 IntfBaseA 和 IntfBaseB 中都定义原型，但是有不同的返回类型 bit 和 string。尽管 funcBase 的实现是一个 IntfBaseA::funcBase 的合法覆盖，但是不同时是 IntfBaseB::funcBase 原型的合法覆盖，所以报错。
+
+#### 8.26.6.2 参数和类型声明冲突和解决
+接口类可以从多个接口类继承参数和类型声明。如果从不同的接口类继承了相同的名称，则会发生名称冲突。子类应该提供参数和/或类型声明，覆盖所有这样的名称冲突。
+
+例如：
+```verilog
+interface class PutImp#(type T = logic);
+    pure virtual function void put(T a);
+endclass
+
+interface class GetImp#(type T = logic);
+    pure virtual function T get();
+endclass
+
+interface class PutGetIntf#(type TYPE = logic)
+    extends PutImp#(TYPE), GetImp#(TYPE);
+    typedef TYPE T;
+endclass
+```
+
+在上面的示例中，参数 T 继承自 PutImp 和 GetImp。尽管 PutImp::T 与 GetImp::T 匹配，但仍会发生冲突，并且 PutGetIntf 从未使用过冲突。PutGetIntf 用类型定义覆盖 T 以解决冲突。
+
+#### 8.26.6.3 菱形关系
+如果接口类由相同的类实现或由相同的接口类以多种方式继承，则会出现 *菱形关系*。在菱形关系的情况下，为了避免名称冲突，将只合并来自任何单个接口类的符号的一个副本。例如:
+```verilog
+interface class IntfBase;
+    parameter SIZE = 64;
+endclass
+
+interface class IntfExt1 extends IntfBase;
+    pure virtual function bit funcExt1();
+endclass
+
+interface class IntfExt2 extends IntfBase;
+    pure virtual function bit funcExt2();
+endclass
+
+interface class IntfExt3 extends IntfExt1, IntfExt2;
+endclass
+```
+
+在上面的例子中，类 IntfExt3 继承了来自 IntfExt1 和 IntfExt2 的参数 SIZE。由于这些参数来自同一个接口类 IntfBase，因此只有一个 SIZE 的副本可以继承到 IntfExt3 中，因此不应将其视为冲突。
+
+参数化接口类的每个唯一参数化都是接口类专门化。每个接口类专门化都被认为是唯一的接口类类型。因此，如果同一参数化接口类的不同专门化由同一接口类继承或由同一类实现，则不存在菱形关系。因此，可能会发生 8.26.6.1 中描述的方法名称冲突以及 8.26.6.2 中描述的参数和类型声明名称冲突。例如:
+```verilog
+interface class IntfBase #(type T = int);
+    pure virtual function bit funcBase();
+endclass
+
+interface class IntfExt1 extends IntfBase#(bit);
+    pure virtual function bit funcExt1();
+endclass
+
+interface class IntfExt2 extends IntfBase#(logic);
+    pure virtual function bit funcExt2();
+endclass
+
+interface class IntfFinal extends IntfExt1, IntfExt2;
+    typedef bit T; // 覆盖冲突的标识符名称
+    pure virtual function bit funcBase();
+endclass
+```
+
+在前面的示例中，接口类 IntfBase 有两种不同的参数化。IntfBase 的每一个参数化都是一个专门化；因此不存在菱形关系，并且必须解决参数 T 和方法 funcBase 之间的冲突。
+
+### 8.26.7 部分实现
+可以创建未完全定义的类，并通过使用虚类来利用接口类（见8.21）。因为虚类不必完全定义它们的实现，所以它们可以自由地部分定义它们的方法。下面是一个部分实现的虚拟类的例子。
+```verilog
+interface class IntfClass;
+    pure virtual function bit funcA();
+    pure virtual function bit funcB();
+endclass
+
+// 部分实现 IntfClass
+virtual class ClassA implements IntfClass;
+    virtual function bit funcA();
+        return (1);
+    endfunction
+    pure virtual function bit funcB();
+endclass
+
+// 完全实现 IntfClass
+class ClassB extends ClassA;
+    virtual function bit funcB();
+        return (1);
+    endfunction
+endclass
+```
+
+在不满足接口类原型要求的情况下，使用接口类部分定义虚类是违法的。换句话说，当接口类由虚类实现时，虚类必须为每个接口类的方法原型执行以下操作之一：
+ - 提供方法实现
+ - 用 pure 限定符重新声明方法原型
+
+在前面的例子中，ClassA 完全定义了 funcA，但是重新声明了原型 funcB。
+
+### 8.26.8 方法默认参数值
+接口类中的方法声明可以有默认的参数值。默认表达式应该是一个常量表达式，并在包含子例程声明的作用域中求值。对于实现该方法的所有类，常量表达式的值应该是相同的。更多信息请参见13.5.3。
+
+### 8.26.9 约束块、覆盖组和随机化
+约束块和覆盖组不能在接口类中声明。
+
+随机方法调用对于接口类句柄应该是合法的。虽然内联约束也是合法的，但接口类不能包含任何数据，这意味着内联约束只能表示与状态变量相关的条件，因此效用非常有限。由于名称解析规则和接口类不允许包含数据成员的事实，使用 rand_mode 和 constraint_mode 不应该是合法的。
+
+接口类包含两个内置的空虚拟方法 pre_randomize() 和 post_randomize()，它们在随机化之前和之后自动调用。这些方法可以被重写。作为一种特殊情况，pre_randomize() 和 post_randomize() 不会导致方法名冲突。
+
+## 8.27 typedef 类
+有时需要在声明类本身之前声明类变量；例如，如果两个类都需要彼此的句柄。当编译器在处理第一个类的声明过程中遇到对第二个类的引用时，该引用是未定义的，并且编译器将其标记为错误。
+
+这可以通过使用 `typedef` 为第二个类提供前向声明来解决：
+```verilog
+typedef class C2; // C2 被声明为 class 类型
+class C1; 
+    C2 c;
+endclass
+
+class C2; 
+    C1 c;
+endclass
+```
+
+在本例中，C2 被声明为 class 类型，这一事实在后面的源代码中得到了加强。class 构造总是创建类型，而不需要为此目的声明 typedef（如 typedef class…）。
+
+在前面的例子中，语句中的 `class` 关键字 `typedef class C2;` 不是必需的，仅用于文档目的。语句 `typedef C2;` 是相等的，应该以同样的方式工作。
+
+与 6.18 中描述的其他前向类型一样，前向类声明的实际类定义应在相同的局部作用域或生成块中解析。
+
+类的前向 `typedef` 可以引用带有参数端口列表的类。
+
+例子:
+```verilog
+typedef class C ;
+module top ;
+    C#(1, real) v2 ; // 位置参数覆盖
+    C#(.p(2), .T(real)) v3 ; // 命名参数覆盖
+endmodule
+
+class C #(parameter p = 2, type T = int);
+endclass
+```
+
+## 8.28 类和结构
+从表面上看，似乎 class 和 struct 提供了相同的功能，并且只需要其中一个。然而，事实并非如此；class 与 struct 在以下三个基本方面有所不同：
+ - a) SystemVerilog 结构体是严格的静态对象；它们要么在静态内存位置（全局或模块作用域）中创建，要么在自动任务的堆栈中创建。相反，SystemVerilog 对象（即类实例）完全是动态的；它们的声明并不创建对象。创建对象是通过调用 new 来完成的。
+ - b) SystemVerilog 对象使用句柄实现，从而提供类似 C 语言的指针功能。但是 SystemVerilog 不允许将句柄转换到其他数据类型；因此，SystemVerilog 句柄没有与 C 指针相关的风险。
+ - c) SystemVerilog 对象构成了提供真正多态性的面向对象数据抽象的基础。类继承、抽象类和动态强制转换是功能强大的机制，它们远远超出了结构提供的单纯封装机制。
+
+## 8.29 内存管理
+对象、字符串、动态数组和关联数组的内存是动态分配的。创建对象时，SystemVerilog 分配更多内存。当一个对象不再需要时，SystemVerilog 自动回收内存，使其可重用。自动内存管理系统是 SystemVerilog 的一个组成部分。如果没有自动内存管理，SystemVerilog 的多线程、可重入环境会给用户带来很多问题。手动内存管理系统，例如 C 语言的 malloc 和 free 提供的系统，是不够的。
+
+考虑下面的例子：
+```verilog
+myClass obj = new;
+fork
+    task1( obj );
+    task2( obj );
+join_none
+```
+
+在本例中，主进程（分离两个任务的进程）不知道何时可以使用对象 obj 完成这两个进程。同样，task1 和 task2 都不知道其他两个进程何时不再使用对象 obj。从这个简单的示例中可以明显看出，没有一个进程拥有足够的信息来确定何时释放对象是安全的。只有以下两个选项可供用户选择：
+ - 小心行事，永远不要收回对象，或者
+ - 添加某种形式的引用计数，可用于确定何时可以安全回收对象。
+
+采用第一个选项可能会导致系统很快耗尽内存。第二种选择给用户带来了很大的负担，他们除了管理测试平台之外，还必须使用不太理想的模式来管理内存。为了避免这些缺点，SystemVerilog 自动管理所有动态内存。
+
+用户不需要担心悬空引用、过早回收或内存泄漏。系统将自动回收不再使用的物品。在前面的示例中，用户所做的就是在不再需要 obj 句柄时，将所有引用它的变量赋值为 null。当一个对象在任何活动作用域中存在对该对象的未完成引用，或者对该对象的非静态成员的未完成的非阻塞赋值时，该对象不得被回收。
