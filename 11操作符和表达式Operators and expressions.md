@@ -565,9 +565,9 @@ cond_pattern ::= expression matches pattern
 
 这节描述了传统的条件操作符，其中 cond_predicate 只是一个单一的表达式。SystemVerilog 还允许 cond_predicate 执行模式匹配，这在 12.6 中描述。
 
-如果 cond_predicate 为真，则操作符返回第一个表达式的值，而不计算第二个表达式；如果为假，则返回第二个表达式的值，而不计算第一个表达式。如果 cond_predicate 评估为不明确的值（x 或 z），则应计算第一个表达式和第二个表达式，并按照 11.4.5 中描述的逻辑等价性进行比较。如果比较为真（1），则操作符应返回第一个或第二个表达式。否则，操作符应根据表达式的数据类型返回结果。
+如果 cond_predicate 为真，则操作符返回第一个表达式的值，而不计算第二个表达式；如果为假，则返回第二个表达式的值，而不计算第一个表达式。如果 cond_predicate 计算为不明确的值（x 或 z），则应计算第一个表达式和第二个表达式，并按照 11.4.5 中描述的逻辑等价性进行比较。如果比较为真（1），则操作符应返回第一个或第二个表达式。否则，操作符应根据表达式的数据类型返回结果。
 
-当第一个和第二个表达式都是整数类型时，如果 cond_predicate 评估为不明确的值，并且表达式不是逻辑等价的，则应使用表 11-20 计算位的结果来计算最终结果。首先，第一个和第二个表达式应扩展到相同的宽度，如 11.6.1 和 11.8.2 中所述。
+当第一个和第二个表达式都是整数类型时，如果 cond_predicate 计算为不明确的值，并且表达式不是逻辑等价的，则应使用表 11-20 计算位的结果来计算最终结果。首先，第一个和第二个表达式应扩展到相同的宽度，如 11.6.1 和 11.8.2 中所述。
 
 表 11-20—条件操作符的不明确条件结果
 | `?:` | 0 | 1 | x | z |
@@ -594,13 +594,1254 @@ wire [15:0] busa = drive_busa ? data : 16'bz;
    - 否则，如果第一个表达式与第二个表达式的赋值兼容，则结果类型是第二个表达式的类型。
    - 否则，如果第二个表达式与第一个表达式的赋值兼容，则结果类型是第一个表达式的类型。
    - 否则，如果第一个表达式和第二个表达式是从共同基类类型继承的类类型，则结果类型是最接近的公共继承类类型。
-   在前面的情况下，如果条件评估为 TRUE，则结果值是第一个表达式的值，如果条件评估为 FALSE，则结果值是第二个表达式的值。
+   在前面的情况下，如果条件计算为 TRUE，则结果值是第一个表达式的值，如果条件计算为 FALSE，则结果值是第二个表达式的值。
  - 对于所有其他情况，第一个表达式和第二个表达式的类型应等效（见 6.22.2）。
 
-对于非整数和聚合表达式，如果 cond_predicate 评估为不明确的值，并且表达式不是逻辑等价的，则：
+对于非整数和聚合表达式，如果 cond_predicate 计算为不明确的值，并且表达式不是逻辑等价的，则：
  - 对于聚合数组数据类型，除关联数组外，如果两个表达式包含相同数量的元素，则它们的结果应逐个元素组合。如果元素匹配，则应返回元素。如果它们不匹配，则应返回表 7-1 中为该元素类型指定的值。
  - 对于所有其他数据类型，应返回表 7-1 中为所得类型指定的值。
 
+### 11.4.12 连接操作符
+连接是由一个或多个表达式的位连接而产生的。连接应使用大括号字符 { 和 } 表示，其中逗号分隔表达式。
 
+不应允许未定大小的常数数字。这是因为需要计算连接的每个操作数的大小以计算连接的完整大小。
 
+以下示例连接了四个表达式：
+```verilog
+{a, b[3:0], w, 3'b101}
+```
 
+上面的示例等效于以下示例：
+```verilog
+{a, b[3], b[2], b[1], b[0], w, 1'b1, 1'b0, 1'b1}
+```
+
+连接被视为位的打包矢量。它可以用作赋值的左操作数或表达式。
+
+```verilog
+logic log1, log2, log3;
+{log1, log2, log3} = 3'b111;
+{log1, log2, log3} = {1'b1, 1'b1, 1'b1}; // 与 3'b111 有相同的效果
+```
+
+连接的一个或多个位可以被选择，就好像连接是一个带有范围 [n-1:0] 的打包数组一样。这样的选择不应作为 net_lvalue、variable_lvalue 或任何等效用途的一部分，例如在赋值的左操作数中。例如：
+```verilog
+byte a, b ;
+bit [1:0] c ;
+c = {a + b}[1:0]; // a 和 b 的和的 2 个 lsb
+```
+
+连接与结构字面量（见 5.10）或数组字面量（见 5.11）不同。连接只用大括号（{ }）括起来，而结构和数组字面量用以撇号（'{ }）括起来。
+
+#### 11.4.12.1 复制操作符
+*复制* 操作符（也称为 *多重连接*）由一个重复常量表达式前面的连接组成，该表达式称为 *复制常量*，不为负、不为 x 和不为 z，用大括号字符括起来。复制表示连接的那么多个副本。与常规连接不同，包含复制的表达式不应出现在赋值的左操作数上，并且不应连接到 output 或 inout 端口。
+
+这个示例复制了 w 四次。
+```verilog
+{4{w}} // 产生与 {w, w, w, w} 相同的值
+```
+
+以下示例显示了非法的复制：
+```verilog
+{1'bz{1'b0}} // 非法
+{1'bx{1'b0}} // 非法
+```
+
+下一个示例说明了一个连接中嵌套的复制：
+```verilog
+{b, {3{a, b}}} // 产生与 {b, a, b, a, b, a, b} 相同的值
+```
+
+复制操作可以具有值为零的复制常量。这在参数化代码中很有用。具有零复制常量的复制被认为具有零大小，并被忽略。这样的复制应仅出现在至少一个操作数的大小为正的连接中。
+
+例如：
+```verilog
+parameter P = 32;
+
+// 对于所有 P 从 1 到 32，以下是合法的
+
+assign b[31:0] = { {32-P{1'b1}}, a[P-1:0] } ;
+
+// 对于 P=32，以下是非法的，因为零复制单独出现在连接中
+
+assign c[31:0] = { {{32-P{1'b1}}}, a[P-1:0] }
+
+// 对于 P=32，以下是非法的
+
+initial
+ $displayb({32-P{1'b1}}, a[P-1:0]);
+```
+
+当计算复制表达式时，应仅计算操作数一次，即使复制常量为零。例如：
+```verilog
+result = {4{func(w)}} ;
+```
+
+将计算为
+```verilog
+y = func(w) ;
+result = {y, y, y, y} ;
+```
+
+#### 11.4.12.2 字符串连接
+允许连接字符串数据对象。一般来说，如果操作数中有任何一个操作数是字符串数据类型，则连接被视为字符串，并且所有其他参数都会被隐式转换为字符串数据类型（如 6.16 中所述）。字符串连接不允许在赋值的左操作数上，只能作为表达式。
+
+```verilog
+string hello = "hello";
+string s;
+s = { hello, " ", "world" };
+$display( "%s\n", s ); // 显示 'hello world'
+s = { s, " and goodbye" };
+$display( "%s\n", s ); // 显示 'hello world and goodbye'
+```
+
+复制操作符形式的大括号也可以与字符串数据对象一起使用。在字符串复制的情况下，允许非常数乘数。
+
+```verilog
+int n = 3;
+string s = {n { "boo " }};
+$display( "%s\n", s ); // 显示 'boo boo boo '
+```
+
+与位连接不同，字符串连接或复制的结果不会被截断。相反，目标变量（字符串类型）将被调整大小以容纳生成的字符串。
+
+### 11.4.13 集合成员操作符
+SystemVerilog 支持单值集合和集合成员操作符。
+
+集合成员操作符的语法如下：
+---
+```verilog
+inside_expression ::= expression inside { open_range_list } // from A.8.3
+```
+---
+语法 11-3—Inside 表达式语法（从附录 A 中摘录）
+
+inside 操作符的左侧表达式是任何单值表达式。
+
+inside 操作符右侧的集合成员 open_range_list 是一个逗号分隔的表达式或范围列表。如果列表中的表达式是未打包数组，则其元素将被遍历，直到到达单值。成员将被扫描，直到找到匹配项，并且操作返回 1'b1。值可以重复；因此，值和值范围可以重叠。表达式和范围的计算顺序是不确定的。
+
+```verilog
+int a, b, c;
+if ( a inside {b, c} ) ...
+int array [$] = '{3,4,5};
+if ( ex inside {1, 2, array} ) ... // 与 { 1, 2, 3, 4, 5} 相同
+```
+
+inside 操作符使用非整数表达式上的等号（==）操作符执行比较。如果找不到匹配项，则 inside 操作符返回 1'b0。整数表达式使用通配符等号（==?）操作符，以便在集合中的值中的 x 或 z 位被视为该位位置的不关心（见 11.4.6）。与通配符等号一样，inside 操作符中左侧的 x 或 z 不被视为不关心。
+
+```verilog
+logic [2:0] val;
+while ( val inside {3'b1?1} ) ... // 匹配 3'b101, 3'b111, 3'b1x1, 3'b1z1
+```
+
+如果找不到匹配项，但某些比较结果为 x，则 inside 操作符应返回 1'bx。返回值实际上是集合中所有与左侧表达式的比较的或约简。
+
+```verilog
+wire r;
+assign r=3'bz11 inside {3'b1?1, 3'b011}; // r = 1'bx
+```
+
+范围可以用方括号 `[ ]` 括起来，由冒号（`:`）分隔的低位和高位界限组成，如 `[low_bound:high_bound]`。由 `$` 指定的边界应表示表达式左侧的类型的最低或最高值。如果左侧的表达式包含在范围内，则找到匹配项。在指定范围时，表达式应为单值类型，其关系运算符（<=、>=）已定义。如果冒号左侧的边界大于冒号右侧的边界，则范围为空，不包含任何值。
+
+例如：
+```verilog
+bit ba = a inside { [16:23], [32:47] };
+string I;
+if (I inside {["a rock":"hard place"]}) ...
+// I 在 "a rock" 和 "hard place" 之间
+```
+
+### 11.4.14 流操作符（打包/解包）
+当转换操作可以使用类型转换来轻松表达，并且位流的特定顺序不重要时，6.24.3 中描述的位流转换最有用。有时，需要一个与特定机器组织匹配的流。流操作符执行位流类型（见 6.24.3）的打包，将位流打包到用户指定顺序的位序列中。当用作赋值的源时，流操作符执行相反的操作，即将位流解包到一个或多个变量中。
+
+如果打包的数据包含任何 4 状态类型，则打包操作的结果是 4 状态流；否则，打包的结果是 2 状态流。在本子句的其余部分，未经其他限定的情况下，单词 *位*，不带其他限定，根据本段所要求的情况，指 2 状态或 4 状态位。
+
+位流连接的语法如下：
+---
+```verilog
+streaming_concatenation ::= { stream_operator [ slice_size ] stream_concatenation } // from A.8.1
+stream_operator ::= >> | <<
+slice_size ::= simple_type | constant_expression 
+stream_concatenation ::= { stream_expression { , stream_expression } }
+stream_expression ::= expression [ with [ array_range_expression ] ]
+array_range_expression ::= 
+expression 
+| expression : expression 
+| expression +: expression 
+| expression -: expression 
+primary ::= // from A.8.4
+... 
+| streaming_concatenation 
+```
+---
+语法 11-4—流连接语法（从附录 A 中摘录）
+
+*流连接*（如语法 11-4 中所指定）应作为赋值的目标、赋值的源、位流转换的操作数或另一个流连接中的 *stream_expression* 使用。使用流连接作为赋值的目标，以及相关的解包操作，在 11.4.14.3 中描述。
+
+使用流连接作为表达式的操作数而不先将其转换为位流类型是错误的。当流连接用作赋值的源时，赋值的目标应是位流类型的数据对象或流连接。
+
+如果目标是位流类型的数据对象，则由源流连接创建的流将被隐式转换为目标的类型。如果目标变量表示固定大小的变量，并且流比变量大，则将生成错误。如果目标变量比流大，则流左对齐，并在右侧填充零。如果目标表示动态大小的变量，例如队列或动态数组，则变量将调整大小以容纳整个流。如果调整大小后，变量比流大，则流左对齐，并在右侧填充零。
+
+流连接的打包操作由两个步骤描述，为方便起见，两个步骤之间的中间结果从不可见，因此工具可以以产生相同整体结果的任何方式实现它。首先，流连接中的所有整数数据被连接到一个位流中，类似于位流转换（如 6.24.3 中所述），但限制较少。其次，结果流可以按照 *stream_operator* 和 *slice_size* 指定的方式重新排序。这两个步骤在 11.4.14.1 和 11.4.14.2 中有更详细的描述。
+
+#### 11.4.14.1 流表达式的连接
+流连接中的每个 *stream_expression*，从左到右依次通过逗号分隔的 *stream_expression* 列表，通过递归应用以下过程将其转换为位流并附加到位流数组（stream）中：
+
+如果 表达式是 *streaming_concatenation* 或者是任何位流类型，则应使用位流转换将其转换为位打包数组，如果需要还包括转换 2 状态到 4 状态，并将该位数组附加到通用流的右端；
+
+否则，如果 表达式是未打包数组（即，队列、动态数组、关联数组或固定大小未打包数组），则应依次对数组的每个元素应用此过程。关联数组按索引排序。其他未打包数组按照 foreach 循环（见 12.7.3）的顺序处理，该循环具有一个索引变量；
+
+否则，如果 表达式是结构类型，则应按照声明顺序依次对结构的每个元素应用此过程；
+
+否则，如果 表达式是未标记的联合类型，则应对联合的第一个声明的成员应用此过程；
+
+否则，如果 表达式是空类句柄，则应跳过（不流），并且可能发出警告；
+
+否则，如果 表达式是非空类句柄，则应依次对引用对象的每个数据成员应用此过程，而不是句柄本身。类成员应按声明顺序流。扩展类成员应在其基类的成员之后流。流包含循环的对象层次结构的结果是未定义的，并且可能会发出错误。如果在流操作符的点上不可访问，则在流类句柄时，将类句柄的本地或受保护成员流是非法的；
+
+否则，应跳过（不流）表达式，并发出错误。
+
+在上述描述中，短语 *跳过（不流）* 意味着不将相关表达式附加到流中，然后操作过程继续处理下一个项目。实现没有义务在发出错误后继续操作过程。
+
+#### 11.4.14.2 通用流的重新排序
+通过 11.4.14.1 描述的操作得到的流然后被重排序，通过切成块然后重新排序这些块。
+
+slice_size 确定每个块的大小，以位为单位。如果未指定 slice_size，则默认为 1。如果指定了 slice_size，则它可以是常量整数表达式或简单类型。如果使用类型，则块大小应为该类型的位数。如果使用常量整数表达式，则该表达式的值为零或负值是错误的。如果使用常量整数表达式，则块大小应为该类型的位数。如果使用常量整数表达式，则该表达式的值为零或负值是错误的。
+
+*流操作符* << 或 >> 确定流的重新排序方式：>> 导致数据块从左到右流，而 << 导致数据块从右到左流。使用 >> 的左到右流应忽略 slice_size 并且不进行重新排序。使用 << 的右到左流应将流切成块，每个块的大小为指定的位数，从最右边的位开始。如果由于切片而导致最后一个（最左边的）块的位数少于块大小，则最后一个块的大小为剩余位数；没有填充或截断。
+
+例如：
+```verilog
+int j = { "A", "B", "C", "D" };
+{ >> {j}} // 生成流 "A" "B" "C" "D"
+{ << byte {j}} // 生成流 "D" "C" "B" "A"（小端）
+{ << 16 {j}} // 生成流 "C" "D" "A" "B"
+{ << { 8'b0011_0101 }} // 生成流 'b1010_1100（位反转）
+{ << 4 { 6'b11_0101 }} // 生成流 'b0101_11
+{ >> 4 { 6'b11_0101 }} // 生成流 'b1101_01（相同）
+{ << 2 { { << { 4'b1101 }} }} // 生成流 'b1110
+```
+
+#### 11.4.14.3 流连接作为赋值目标（解包）
+当流连接作为赋值的目标时，流操作符执行相反的操作；即，将流解包到一个或多个变量中。源表达式应为位流类型，或者另一个流连接的结果。如果源表达式包含的位数多于所需的位数，则应从其左（最高位）端消耗适当数量的位。但是，如果源表达式包含的位数少于所需的位数，则应生成错误。
+
+解包 4 状态流到 2 状态目标是通过将 4 状态流转换为 2 状态流来完成的，反之亦然。空句柄应被跳过，无论是打包还是解包；因此，解包操作不应创建类对象。如果要从流中重建特定对象层次结构，则必须在应用流操作符之前创建该对象层次结构。解包操作仅修改显式声明的属性；它不会修改隐式声明的属性，例如随机模式（见第 18 章）。
+
+例如：
+```verilog
+int a, b, c;
+logic [10:0] up [3:0];
+logic [11:1] p1, p2, p3, p4;
+bit [96:1] y = {>>{ a, b, c }}; // OK：打包 a, b, c
+int j = {>>{ a, b, c }}; // 错误：j 是 32 位 < 96 位
+bit [99:0] d = {>>{ a, b, c }}; // OK：d 用 4 位填充
+{>>{ a, b, c }} = 23'b1; // 错误：流中的位数太少
+{>>{ a, b, c }} = 96'b1; // OK：解包 a = 0, b = 0, c = 1
+{>>{ a, b, c }} = 100'b1; // OK：解包如上（4 位未读）
+{ >> {p1, p2, p3, p4}} = up; // OK：解包 p1 = up[3], p2 = up[2], p3 = up[1], p4 = up[0]
+```
+
+#### 11.4.14.4 动态大小数据流
+如果解包操作包括无界动态大小类型，则解包操作应是贪婪的（如转换）：第一个动态大小项被调整大小以接受流中的所有可用数据（不包括后续固定大小项）；任何剩余的动态大小项被留空。这种机制足以解包只包含一个动态大小数据项的数据包大小的流。然而，当流包含多个可变大小数据包，或者每个数据包包含多个可变大小数据项，或者要解包的数据大小存储在流的中间时，这种机制可能变得繁琐且容易出错。为了克服这些问题，解包操作允许使用 with 表达式在解包操作中显式指定变量的范围。
+
+with 表达式的语法如下：
+---
+```verilog
+stream_expression ::= expression [ with [ array_range_expression ] ] // from A.8.1
+array_range_expression ::= 
+expression 
+| expression : expression 
+| expression +: expression 
+| expression -: expression 
+```
+---
+语法 11-5—With 表达式语法（从附录 A 中摘录）
+
+with 构造中的数组范围表达式应为整数类型，并计算为固定大小数组的范围或对于动态数组或队列为正值。with 中的表达式在其相应数组被流（打包或解包）之前立即计算；因此，表达式可以引用由同一运算符解包的数据，但在数组右侧的表达式引用的变量的值是先前的变量值。
+
+当在解包操作中使用时，数组应调整大小以容纳范围表达式。如果数组是固定大小数组，并且范围表达式计算为超出数组范围的范围，则仅解包数组范围内的范围，并生成错误。如果范围表达式计算为小于数组范围的范围，则仅解包指定的项到指定的数组位置；数组的其余部分不会被修改。
+
+当在打包操作（在右边）中使用时，它的行为与数组切片相同。指定数量的数组项被打包到流中。如果范围表达式计算为小于数组范围的范围，则仅打包指定的数组项到指定的数组位置；数组的其余部分不会被修改。如果范围表达式计算为大于数组大小的范围，则整个数组被打包，并且剩余项使用不存在的数组条目值（如 7.4.6 中表 7-1 中所述）生成。
+
+例如，以下代码使用流操作符模拟了一个字节流上的数据包传输，该字节流使用小端编码：
+```verilog
+byte stream[$]; // 字节流
+
+class Packet;
+    rand int header;
+    rand int len;
+    rand byte payload[];
+    int crc;
+
+    constraint G { len > 1; payload.size == len ; }
+
+    function void post_randomize; crc = payload.sum; endfunction
+endclass
+
+...
+send: begin // 创建随机数据包并传输
+    byte q[$];
+    Packet p = new;
+    void'(p.randomize());
+    q = {<< byte{p.header, p.len, p.payload, p.crc}}; // 打包
+    stream = {stream, q}; // 追加到流
+end
+
+...
+receive: begin // 接收数据包，解包并删除
+    byte q[$];
+    Packet p = new;
+    {<< byte{ p.header, p.len, p.payload with [0 +: p.len], p.crc }} = stream;
+    stream = stream[ $bits(p) / 8 : $ ]; // 删除数据包
+end
+```
+
+在上面的示例中，打包操作可以写成以下任一形式：
+```verilog
+q = {<<byte{p.header, p.len, p.payload with [0 +: p.len], p.crc}};
+```
+
+或
+```verilog
+q = {<<byte{p.header, p.len, p.payload with [0 : p.len-1], p.crc}};
+```
+
+或
+```verilog
+q = {<<byte{p}};
+```
+
+在这种情况下，结果是相同的，因为 p.len 是由约束指定的 p.payload 的大小。
+
+## 11.5 操作数
+在表达式中可以指定几种类型的操作数。最简单的类型是对线网、变量或参数的引用，以其完整形式给出；即，只给出线网、变量或参数的名称。在这种情况下，组成线网、变量或参数值的所有位都将用作操作数。
+
+如果需要一个向量线网、向量变量、打包数组、打包结构或参数的单个位，则应使用位选择操作数。应使用部分选择操作数来引用向量线网、向量变量、打包数组、打包结构或参数中的一组相邻位。
+
+可以引用未打包数组元素作为操作数。
+
+可以指定其他操作数（包括嵌套连接）的连接作为操作数。
+
+函数调用是一个操作数。
+
+上述提到的每种操作数类型都是 *简单操作数* 的一个示例。如果操作数不是括号化的并且是 A.8.4 中定义的 *主要* 操作数，则该操作数是简单的。在下面的示例中，表达式 1'b1 - 2'b00 和 (1'b1 + 1'b1) 是操作数，但不是简单操作数。
+```verilog
+1'b1 - 2'b00 + (1'b1 + 1'b1)
+```
+
+### 11.5.1 向量位选择和部分选择寻址
+位选择从向量、打包数组、打包结构、参数或连接中提取特定位。位可以使用在自决上下文中计算的表达式来寻址。如果位选择地址无效（超出范围或有一个或多个 x 或 z 位），则引用的值应为 4 状态值 x，对于 2 状态值应为 0。标量、实数变量或实数参数的位选择或部分选择是非法的。
+
+可以寻址几个连续位，称为 *部分选择*。有两种类型的部分选择：*非索引部分选择* 和 *索引部分选择*。非索引部分选择的语法如下：
+```verilog
+vect[msb_expr:lsb_expr]
+```
+
+msb_expr 和 lsb_expr 都应是常量整数表达式。这两个表达式都应在自决上下文中计算。第一个表达式应寻址比第二个表达式更高的位。
+
+索引部分选择的语法如下：
+```verilog
+logic [15:0] down_vect;
+logic [0:15] up_vect;
+
+down_vect[lsb_base_expr +: width_expr]
+up_vect[msb_base_expr +: width_expr]
+
+down_vect[msb_base_expr -: width_expr]
+up_vect[lsb_base_expr -: width_expr]
+```
+
+msb_base_expr 和 lsb_base_expr 应是整数表达式，width_expr 应是正常数整数表达式。这些表达式都应在自决上下文中计算。lsb_base_expr 和 msb_base_expr 可以在运行时变化。前两个示例选择从基础开始并升序选择位范围。选择的位数等于宽度表达式。后两个示例选择从基础开始并降序选择位范围。
+
+*常量位选择* 是一个位选择，其位置是常量。*常量部分选择* 是一个部分选择，其位置和宽度都是常量。部分选择的宽度始终是常量。因此，非索引部分选择始终是常量部分选择，索引部分选择是常量部分选择，如果其基础是常量值以及其宽度是常量。
+
+部分选择寻址一系列完全超出向量、打包数组、打包结构、参数或连接的地址范围的位，或者是 x 或 z 的部分选择，应在读取时返回 x，写入时只影响范围内的位。
+
+例如：
+```verilog
+logic [31: 0] a_vect;
+logic [0 :31] b_vect;
+logic [63: 0] dword;
+integer sel;
+
+a_vect[ 0 +: 8] // == a_vect[ 7 : 0]
+a_vect[15 -: 8] // == a_vect[15 : 8]
+
+b_vect[ 0 +: 8] // == b_vect[0 : 7]
+b_vect[15 -: 8] // == b_vect[8 :15]
+
+dword[8*sel +: 8] // 变量部分选择与固定宽度
+```
+
+下面的示例指定了由操作数索引指定的向量 acc 的单个位：
+```verilog
+acc[index]
+```
+
+地址确定的位实际上是由 acc 的声明确定的。例如，下一个示例中的 acc 的每个声明导致 index 的特定值访问不同的位：
+```verilog
+logic [15:0] acc;
+logic [2:17] acc;
+```
+
+下一个示例及其后面的项目描述了位寻址的原则。代码声明了一个名为 vect 的 8 位变量，并将其初始化为 4。列表描述了该向量的各个位如何寻址。
+```verilog
+logic [7:0] vect;
+vect = 4; // 填充 vect 为 00000100，msb 是位 7，lsb 是位 0
+```
+
+ - 如果 addr 的值为 2，则 vect[addr] 返回 1。
+ - 如果 addr 的值超出范围，则 vect[addr] 返回 x。
+ - 如果 addr 为 0、1 或 3 到 7，则 vect[addr] 返回 0。
+ - vect[3:0] 返回位 0100。
+ - vect[5:1] 返回位 00010。
+ - vect[返回 x 的表达式] 返回 x。
+ - vect[返回 z 的表达式] 返回 x。
+ - 如果 addr 的任何位为 x 或 z，则 addr 的值为 x。
+
+注意 1：计算为 x 或 z 的部分选择索引可能会被标记为编译时错误。
+
+注意 2：位选择或部分选择索引超出声明范围可能会被标记为编译时错误。
+
+### 11.5.2 数组和内存寻址
+数组和内存的声明（reg、logic 或 bit 的一维数组）在 7.4 中讨论。本节讨论数组寻址。
+
+下面的示例声明了一个 1024 个 8 位字的内存：
+```verilog
+logic [7:0] mem_name[0:1023];
+```
+
+内存寻址的语法应包括内存的名称和地址表达式，使用以下格式指定：
+```verilog
+mem_name[addr_expr]
+```
+
+addr_expr 可以是任何整数表达式；因此，内存间接寻址可以在单个表达式中指定。下一个示例说明了内存间接寻址：
+```verilog
+mem_name[mem_name[3]]
+```
+
+在此示例中，mem_name[3] 寻址名为 mem_name 的内存的第三个字。字三的值是由内存地址 mem_name[3] 使用的索引。与位选择一样，声明内存中给定的地址界限决定地址表达式的效果。如果地址无效（超出范围或有一个或多个 x 或 z 位），则引用的值应如 7.4.6 中所述。
+
+下一个示例声明了一个 256x256 个 8 位元素的数组和一个 256x256x8 个 1 位元素的数组：
+```verilog
+logic [7:0] twod_array[0:255][0:255];
+wire threed_array[0:255][0:255][0:7];
+```
+
+对数组的访问的语法应包括内存或数组的名称和每个寻址维度的整数表达式：
+```verilog
+twod_array[addr_expr][addr_expr]
+threed_array[addr_expr][addr_expr][addr_expr]
+```
+
+与以前一样，addr_expr 可以是任何整数表达式。数组 twod_array 访问整个 8 位向量，而数组 threed_array 访问三维数组的单个位。
+
+要表示数组元素的位选择或部分选择，应首先选择所需的字，然后使用与线网和变量位选择和部分选择相同的方式寻址位选择和部分选择（见 11.5.1）。
+
+例如：
+```verilog
+twod_array[14][1][3:0] // 访问字的低 4 位
+twod_array[1][3][6] // 访问字的第 6 位
+twod_array[1][3][sel] // 使用变量位选择
+threed_array[14][1][3:0] // 非法
+```
+
+### 11.5.3 最长静态前缀
+非正式地，*最长静态前缀* 是一个选择的最长部分，对于该选择，分析工具在展开后具有已知值。在描述隐式敏感性列表（见 9.2.2.2）和逻辑端口驱动器（见 6.5）的错误条件时，使用此概念。本节的其余部分定义了什么构成选择的“最长静态前缀”。
+
+字段选择定义为层次名称，其中最后一个“`.`”层次分隔符的右侧标识具有 struct 或 union 声明类型的变量的字段。字段选择前缀定义为字段选择中最后一个“.”层次分隔符的左侧。
+
+索引选择是单个索引操作。索引选择前缀是标识符；或者是另一个索引选择，在多维选择的情况下。数组选择、位选择、部分选择和索引部分选择是索引选择的示例。
+
+静态前缀的定义是递归的，如下所示：
+ - 标识符是静态前缀。
+ - 对对象的层次引用是静态前缀。
+ - 对线网或变量的打包引用是静态前缀。
+ - 如果字段选择前缀是静态前缀，则字段选择是静态前缀。
+ - 如果索引选择前缀是静态前缀，并且选择表达式是常量表达式，则索引选择是静态前缀。
+
+最长静态前缀的定义如下：
+ - 不是字段选择前缀或索引选择前缀的标识符。
+ - 如果字段选择前缀不是静态前缀，则字段选择不是静态前缀。
+ - 如果索引选择前缀不是静态前缀，且选择表达式是常量表达式，则索引选择不是静态前缀。
+
+示例：
+```verilog
+localparam p = 7;
+reg [7:0] m [5:1][5:1];
+integer i;
+
+m[1][i] // 最长静态前缀是 m[1]
+m[p][1] // 最长静态前缀是 m[p][1]
+m[i][1] // 最长静态前缀是 m
+```
+
+## 11.6 表达式位长度
+表达式的位数由操作数和上下文确定。可以使用类型转换来设置中间值的大小上下文（见 6.24）。
+
+控制表达式计算中使用的位数非常重要，如果要获得一致的结果。一些情况有一个简单的解决方案；例如，如果在两个 16 位变量上指定按位 AND 操作，则结果是 16 位值。然而，在某些情况下，如何计算表达式或结果应该是什么大小是不明显的。
+
+例如，两个 16 位值的算术加法应该使用 16 位进行计算，还是应该使用 17 位以允许可能的进位溢出？答案取决于被建模的设备类型以及该设备是否处理进位溢出。
+
+SystemVerilog 使用操作数的位数来确定在计算表达式时使用多少位。位数规则如下 11.6.1。在加法运算符的情况下，应使用最大操作数的位数，包括赋值的左侧。
+
+例如：
+```verilog
+logic [15:0] a, b; // 16 位变量
+logic [15:0] sumA; // 16 位变量
+logic [16:0] sumB; // 17 位变量
+
+sumA = a + b; // 表达式使用 16 位计算
+sumB = a + b; // 表达式使用 17 位计算
+```
+
+### 11.6.1 表达式位长度规则
+控制表达式位长度的规则是为了使大多数实际情况有一个自然的解决方案。
+
+表达式的位数（称为表达式的 *大小*）应由参与表达式的操作数和表达式所在的上下文确定。
+
+*自决表达式* 是表达式的位数仅由表达式本身决定的表达式，例如表示延迟值的表达式。
+
+*上下文决定表达式* 是表达式的位数由表达式的位数和它是另一个表达式的一部分这个事实决定的表达式。例如，赋值的右侧的右侧表达式的位数取决于它自己和左侧的位数。
+
+表 11-21 显示了表达式形式如何确定表达式结果的位数。在表 11-21 中，i、j 和 k 表示操作数的表达式，L(i) 表示由 i 表示的操作数的位数。
+
+表 11-21—自决表达式的位长度
+| 表达式 | 位长度 | 说明 |
+| :---: | :---: | :---: |
+| 未定大小的常量数字 | 与整数相同 | |
+| 已定大小的常量数字 | 给定大小 | |
+| i op j，其中 op 是：<br> `+ - * / % & \| ^ ^~ ~^` | `max(L(i), L(j))` | |
+| op i，其中 op 是：<br> `+ - ~` | `L(i)` | |
+| i op j，其中 op 是：<br> `=== !== == != > >= < <=` | 1 位 | 操作数被调整为 `max(L(i), L(j))` |
+| i op j，其中 op 是：<br> `&& \|\| –> <->` | 1 位 | 所有操作数都是自决的 |
+| op i，其中 op 是：<br> `& ~& \| ~\| ^ ~^ ^~ !` | 1 位 | 所有操作数都是自决的 |
+| i op j，其中 op 是：<br> `>> << ** >>> <<<` | `L(i)` | j 是自决的 |
+| i ? j : k | `max(L(j), L(k))` | i 是自决的 |
+| `{i,...,j}` | `L(i)+..+L(j)` | 所有操作数都是自决的 |
+| `{i{j,..,k}}` | `i × (L(j)+..+L(k))` | 所有操作数都是自决的 |
+
+通过将结果分配给足够宽的内容，可以执行不丢失任何溢出位的乘法。
+
+### 11.6.2 表达式位长度问题示例
+在表达式计算期间，中间结果应采用最大操作数的大小（在赋值的情况下，这也包括左侧）。必须注意防止在表达式计算期间丢失一个重要位。以下示例描述了操作数的位长度如何导致丢失一个重要位。
+
+给定以下声明：
+```verilog
+logic [15:0] a, b, answer; // 16 位变量
+```
+
+意图是计算表达式
+```verilog
+answer = (a + b) >> 1; // 不会正常工作
+```
+
+其中 a 和 b 要相加，这可能会导致溢出，然后将结果向右移动 1 位以保留 16 位答案中的进位位。
+
+问题出现在，表达式中的所有操作数都是 16 位宽。因此，表达式 (a + b) 产生的中间结果只有 16 位宽，因此在执行 1 位右移操作之前丢失了进位位。
+
+解决方案是强制表达式 (a + b) 使用至少 17 位进行计算。例如，将整数值 0 添加到表达式将导致使用整数的位大小进行计算。以下示例将产生预期的结果：
+```verilog
+answer = (a + b + 0) >> 1; // 将正常工作
+```
+
+在下面的示例中：
+```verilog
+module bitlength();
+    logic [3:0] a, b, c;
+    logic [4:0] d;
+    initial begin
+        a = 9;
+        b = 8;
+        c = 1;
+        $display("answer = %b", c ? (a&b) : d);
+    end
+endmodule
+```
+
+$display 语句将显示
+```verilog
+answer = 01000
+```
+
+单独看，表达式 `a&b` 的位长度为 4，但因为它在条件表达式的上下文中，该条件表达式使用最大位长度，因此表达式 `a&b` 实际上有 5 位长度，d 的长度为 5。
+
+### 11.6.3 自决表达式示例
+```verilog
+logic [3:0] a;
+logic [5:0] b;
+logic [15:0] c;
+
+initial begin
+    a = 4'hF;
+    b = 6'hA;
+    $display("a*b=%h", a*b); // 表达式大小是自决的
+    c = {a**b}; // 表达式 a**b 是自决的
+                // 由于连接运算符 {}，表达式大小是自决的
+    $display("a**b=%h", c);
+    c = a**b; // 表达式大小由 c 确定
+    $display("c=%h", c);
+end
+```
+
+此示例的仿真器输出：
+```verilog
+a*b=16 // 'h96 被截断为 'h16，因为表达式大小是 6
+a**b=1 // 表达式大小是 4 位（a 的大小）
+c=ac61 // 表达式大小是 16 位（c 的大小）
+```
+
+## 11.7 符号表达式
+控制表达式的符号是重要的，如果要获得一致的结果。11.8.1 概述了确定表达式是否有符号的规则。
+
+改变表达式的符号或类型是通过使用强制转换运算符来实现的（见 6.24.1）。除了强制转换运算符之外，`$signed` 和 `$unsigned` 系统函数可用于强制转换表达式的符号。这些函数将计算输入表达式并返回一个具有相同位数和值的输入表达式的一维打包数组，其符号由函数定义。
+
+`$signed` — 返回值是有符号的
+
+`$unsigned` — 返回值是无符号的
+
+例如：
+```verilog
+logic [7:0] regA, regB;
+logic signed [7:0] regS;
+
+regA = $unsigned(-4); // regA = 8'b11111100
+regB = $unsigned(-4'sd4); // regB = 8'b00001100
+regS = $signed(4'b1100); // regS = -4
+
+regA = unsigned'(-4); // regA = 8'b11111100
+regS = signed'(4'b1100); // regS = -4
+
+regS = regA + regB; // 将执行无符号加法
+regS = byte'(regA) + byte'(regB); // 将执行有符号加法
+regS = signed'(regA) + signed'(regB); // 将执行有符号加法
+regS = $signed(regA) + $signed(regB); // 将执行有符号加法
+```
+
+## 11.8 表达式求值规则
+### 11.8.1 表达式类型的规则
+确定表达式的结果类型的规则如下：
+ - 表达式类型仅取决于操作数。它不取决于左侧（如果有）。
+ - 十进制数是有符号的。
+ - 基于数字是无符号的，除非在基数说明符中使用 s 表示法（如 4'sd12）。
+ - 位选择结果是无符号的，无论操作数如何。
+ - 部分选择结果是无符号的，无论操作数如何，即使部分选择指定整个向量。
+```verilog
+logic [15:0] a;
+logic signed [7:0] b;
+
+initial
+    a = b[7:0]; // b[7:0] 是无符号的，因此是零扩展的
+```
+ - 连接结果是无符号的，无论操作数如何。
+ - 比较和减少运算符的结果是无符号的，无论操作数如何。
+ - 通过类型强制转换将实数转换为整数的结果是有符号的。
+ - 任何自决操作数的符号和大小由操作数本身确定，与表达式的其余部分无关。
+ - 对于非自决操作数，应用以下规则：
+   - 如果任何操作数是实数，则结果是实数。
+   - 如果任何操作数是无符号的，则结果是无符号的，无论操作符如何。
+   - 如果所有操作数都是有符号的，则结果将是有符号的，无论操作符如何，除非另有规定。
+
+### 11.8.2 求值表达式的步骤
+求值表达式的步骤如下：
+ - 根据确定表达式大小的标准规则确定表达式大小。
+ - 使用 11.8.1 中概述的规则确定表达式的符号。
+ - 将表达式（或自决定的子表达式）的类型和大小传播回到表达式的上下文确定操作数。通常，操作符的任何上下文确定操作数应与操作符的结果相同。但是，有两个例外：
+   - 如果操作符的结果类型是实数，且具有不是实数的上下文确定操作数，则该操作数应被视为自决的，然后在应用操作符之前将其转换为实数。
+   - 关系和相等运算符的操作数既不是完全自决的也不是完全上下文确定的。操作数应互相影响，就好像它们是上下文确定的操作数，其结果类型和大小（两个操作数大小的最大值）由它们确定。但是，实际结果类型始终为 1 位无符号的。操作数的类型和大小应与表达式的其余部分无关，反之亦然。
+ - 当传播到 11.5 中定义的简单操作数时，该操作数应转换为传播的类型和大小。如果需要扩展操作数，则仅在传播的类型为有符号时扩展，否则仅在传播的类型为无符号时扩展。
+
+### 11.8.3 求值赋值的步骤
+求值赋值的步骤如下：
+ - 根据标准赋值大小确定规则（见 11.6）确定右侧的大小。
+ - 如果需要，扩展右侧的大小，仅在右侧的类型为有符号时执行符号扩展。
+
+### 11.8.4 在有符号表达式中处理 X 和 Z
+如果有符号操作数要调整为更大的有符号宽度，并且符号位的值为 x，则结果值应用 x 进行位填充。如果值的符号位为 z，则结果值应用 z 进行位填充。如果有符号值的任何位为 x 或 z，则涉及该值的任何非逻辑操作都应导致整个结果值为 x，并且类型与表达式的类型一致。
+
+## 11.9 标记联合表达式和成员访问
+---
+```verilog
+expression ::= // from A.8.3
+... 
+| tagged_union_expression 
+tagged_union_expression ::= 
+tagged member_identifier [ expression ] 
+```
+---
+语法 11-6—标记联合语法（摘自附录 A）
+
+使用关键字 tagged，后跟标记联合成员标识符，后跟表示相应成员值的表达式，来表示标记联合表达式（打包或解包）。对于 void 成员，成员值表达式被省略。
+
+例如：
+```verilog
+typedef union tagged {
+    void Invalid;
+    int Valid;
+} VInt;
+
+VInt vi1, vi2;
+
+vi1 = tagged Valid (23+34); // 创建有效 int
+vi2 = tagged Invalid; // 创建一个无效值
+```
+
+在以下标记联合表达式中，大括号中的表达式是结构赋值模式（见 10.9.2）。
+```verilog
+typedef union tagged {
+    struct {
+        bit [4:0] reg1, reg2, regd;
+    } Add;
+    union tagged {
+        bit [9:0] JmpU;
+        struct {
+            bit [1:0] cc; 
+            bit [9:0] addr;
+        } JmpC;
+    } Jmp;
+} Instr;
+
+Instr i1, i2;
+
+// 创建一个 Add 指令及其 3 个寄存器字段
+i1 = ( e
+    ? tagged Add '{ e1, 4, ed }; // 按位置的结构成员
+    : tagged Add '{ reg2:e2, regd:3, reg1:19 }); // 按名称（顺序无关）：按名称
+
+// 创建一个 Jump 指令，带有“无条件”子操作码
+i1 = tagged Jmp (tagged JmpU 239);
+
+// 创建一个 Jump 指令，带有“条件”子操作码
+i2 = tagged Jmp (tagged JmpC '{ 2, 83 }); // 按位置的内部结构
+i2 = tagged Jmp (tagged JmpC '{ cc:2, addr:83 }); // 按名称
+```
+
+标记联合表达式的类型应从其上下文中知道（例如，它用作已知类型的变量的赋值的右侧，或者它具有强制转换，或者它用于另一个表达式中，从中可以知道其类型）。表达式求值为该类型的标记联合值。标记联合表达式可以完全静态地进行类型检查；在标记关键字之后允许的唯一成员名称是表达式类型的成员名称，成员表达式应具有相应的成员类型。
+
+标记联合类型的未初始化变量应为未定义的。这包括标记位。标记联合类型的变量可以使用标记联合表达式初始化，前提是成员值表达式是成员类型的合法初始化程序。
+
+可以使用通常的点符号访问标记联合的成员。这种访问是完全类型检查的，即读取或分配的值应与当前标记一致。通常，这可能需要运行时检查。尝试读取或分配与标记不一致的类型的值会导致运行时错误。
+
+只有在指令变量 i1 当前具有标记 Add 时，以下所有示例都是合法的：
+```verilog
+x = i1.Add.reg1;
+i1.Add = '{19, 4, 3};
+i1.Add.reg2 = 4;
+```
+
+## 11.10 字符串字面量表达式
+本节讨论字符串字面量（见 5.9）和存储在位向量和其他打包类型中的字符串字面量的操作。SystemVerilog 还有字符串变量，它们以与向量不同的方式存储字符串。字符串数据类型具有几种特殊的内置方法来操作字符串。有关操作字符串的方法的讨论，请参见 6.16。
+
+字符串字面量操作数应被视为常量数字，由一个字符一个的 8 位 ASCII 代码序列组成。任何 SystemVerilog 操作符都可以操作字符串字面量操作数。操作符应表现为整个字符串是单个数值。
+
+当向量大于所需的字符串字面量值时，赋值后的内容应在左侧填充为零。这与在赋值非字符串无符号值时发生的填充一致。
+
+以下示例声明了一个足够大的向量变量来容纳 14 个字符，并为其赋值。然后，示例使用连接运算符操作存储的值。
+```verilog
+module string_test;
+    bit [8*14:1] stringvar;
+    initial begin
+        stringvar = "Hello world";
+        $display("%s is stored as %h", stringvar, stringvar);
+        stringvar = {stringvar,"!!!"};
+        $display("%s is stored as %h", stringvar, stringvar);
+    end
+endmodule
+```
+
+模拟上述描述的结果如下：
+```verilog
+Hello world is stored as 00000048656c6c6f20776f726c64
+Hello world!!! is stored as 48656c6c6f20776f726c64212121
+```
+
+### 11.10.1 字符串字面量操作
+SystemVerilog 操作符支持字符串字面量和存储在向量中的字符串字面量的常见字符串操作 *复制*、*连接* 和 *比较*。复制由简单赋值提供。连接由连接运算符提供。比较由等式运算符提供。
+
+在操作字符串字面量值的向量时，向量应至少为 `8*n` 位（其中 n 是 ASCII 字符数），以保留 8 位 ASCII 代码。
+
+### 11.10.2 字符串字面量值填充和潜在问题
+当字符串字面量赋值给向量时，存储的值应在左侧填充为零。填充可能会影响比较和连接操作的结果。比较和连接运算符不应区分填充导致的零和原始字符串字符（`\0`，ASCII NUL）。
+
+以下示例说明了潜在问题：
+```verilog
+bit [8*10:1] s1, s2;
+initial begin
+    s1 = "Hello";
+    s2 = " world!";
+    if ({s1,s2} == "Hello world!")
+        $display("strings are equal");
+end
+```
+
+此示例中的比较失败，因为在赋值期间变量 s1 和 s2 被填充，如下例所示：
+```verilog
+s1 = 000000000048656c6c6f
+s2 = 00000020776f726c6421
+```
+
+s1 和 s2 的连接包括零填充，导致以下值：
+```verilog
+000000000048656c6c6f00000020776f726c6421
+```
+
+因为字符串字面量 “Hello world!” 不包含零填充，所以比较失败，如下例所示：
+![0 in str](str0.png)
+
+比较的结果为零，表示为 false。
+
+### 11.10.3 空字符串字面量处理
+空字符串字面量（""）应被视为等同于 ASCII NUL（"\0"），其值为零（0），与字符串 "0" 不同。
+
+## 11.11 运算符重载
+有各种各样的算术运算可能是有用的：饱和、任意大小浮点、进位保存等。为了可读性，最好使用常规算术运算符，而不是依赖于函数调用。
+---
+```verilog
+overload_declaration ::= // from A.2.8
+bind overload_operator function data_type function_identifier ( overload_proto_formals ) ;
+overload_operator ::= + | ++ | – | – – | * | ** | / | % | == | != | < | <= | > | >= | =
+overload_proto_formals ::= data_type {, data_type} 
+```
+---
+语法 11-7—运算符重载语法（摘自附录 A）
+
+运算符重载允许将算术运算符应用于通常不允许的数据类型，例如未打包的结构。当使用函数调用时，这不会改变运算符的含义。换句话说，当使用运算符重载时，这样的代码不会改变行为。
+
+重载声明将运算符链接到函数原型。然后匹配参数，然后检查结果的数据类型。多个函数可以具有相同的参数并具有不同的返回数据类型。如果没有预期的数据类型，因为运算符在自决上下文中，则应使用强制转换来选择正确的函数。类似地，如果由于嵌套运算符而可能匹配多个函数，应使用强制转换来选择正确的函数。
+
+在下列任一上下文中存在预期的结果数据类型：
+ - 赋值或赋值表达式的右侧
+ - 用作子例程调用的实际输入参数
+ - 用作模块、接口或程序的输入端口连接
+ - 用作模块、接口、程序或类的实际参数
+ - 具有明确比较的关系运算符
+ - 在强制转换中
+
+例如，假设有一个结构类型 float：
+```verilog
+typedef struct {
+    bit sign;
+    bit [3:0] exponent;
+    bit [10:0] mantissa;
+} float;
+```
+
+可以通过调用函数来将 + 运算符应用于此结构，如下所示的以下重载声明：
+```verilog
+bind + function float faddif(int, float);
+bind + function float faddfi(float, int);
+bind + function float faddrf(real, float);
+bind + function float faddrf(shortreal, float);
+bind + function float faddfr(float, real);
+bind + function float faddfr(float, shortreal);
+bind + function float faddff(float, float);
+bind + function float fcopyf(float); // 一元 +
+bind + function float fcopyi(int); // 一元 +
+bind + function float fcopyr(real); // 一元 +
+bind + function float fcopyr(shortreal); // 一元 +
+
+float A, B, C, D;
+assign A = B + C; // 等效于 A = faddff(B, C);
+assign D = A + 1.0; // 等效于 A = faddfr(A, 1.0);
+```
+
+重载声明根据重载表达式中的相应参数数据类型将 + 运算符链接到每个函数原型，通常应该准确匹配。例外情况是，如果实际参数是整数类型，并且只有一个具有相应整数参数的原型，则在调用函数时应用正常的隐式转换规则。例如，可以使用 int 参数定义 fcopyi 函数：
+```verilog
+function float fcopyi (int i);
+    float o;
+    o.sign = i[31];
+    o.exponent = 0;
+    o.mantissa = 0;
+    ...
+    return o;
+endfunction
+```
+
+重载赋值运算符还用于重载隐式赋值或强制转换。这些使用与一元 + 相同的函数。
+```verilog
+bind = function float fcopyi(int); // 将 int 转换为 float
+bind = function float fcopyr(real); // 将 real 转换为 float
+bind = function float fcopyr(shortreal); // 将 shortreal 转换为 float
+```
+
+可以重载的运算符是算术运算符、关系运算符和赋值。不能重载 float 到 float 的赋值运算符，因为在前面的三个 bind 语句中已经合法。类似地，不能重载 float 之间的相等性和不等式。
+
+不能假定 0 或 1 的格式；因此，用户不能依赖减法给出相等性或依赖加法给出增量。同样，不能假定正数或负数的格式；因此，比较应明确编码。
+
+赋值运算符，如 +=，是从 + 和 = 运算符连续构建的，其中 = 具有其正常含义。例如：
+```verilog
+float A, B;
+bind + function float faddff(float, float);
+always @(posedge clock) A += B; // 等效于 A = A + B
+```
+
+重载声明的范围和可见性遵循与数据声明相同的搜索规则。重载声明应在可见的范围内使用前定义。由重载声明绑定的函数使用与调用运算符的范围中的函数调用相同的范围搜索规则。
+
+## 11.12 最小、典型和最大延迟表达式
+SystemVerilog 延迟表达式可以指定为由冒号分隔的三个表达式，这些表达式由括号括起来。这旨在依次表示最小、典型和最大值。语法如下 11-8：
+---
+```verilog
+mintypmax_expression ::= // from A.8.3
+expression 
+| expression : expression : expression 
+constant_mintypmax_expression ::= 
+constant_expression
+| constant_expression : constant_expression : constant_expression 
+expression ::= 
+primary 
+| unary_operator { attribute_instance } primary 
+| inc_or_dec_expression 
+| ( operator_assignment )
+| expression binary_operator { attribute_instance } expression 
+| conditional_expression 
+| inside_expression 
+| tagged_union_expression 
+constant_expression ::= 
+constant_primary 
+| unary_operator { attribute_instance } constant_primary 
+| constant_expression binary_operator { attribute_instance } constant_expression 
+| constant_expression ? { attribute_instance } constant_expression : constant_expression 
+constant_primary ::= // from A.8.4
+primary_literal 
+| ps_parameter_identifier constant_select 
+| specparam_identifier [ [ constant_range_expression ] ] 
+| genvar_identifier39
+| formal_port_identifier constant_select 
+| [ package_scope | class_scope ] enum_identifier 
+| constant_concatenation [ [ constant_range_expression ] ] 
+| constant_multiple_concatenation [ [ constant_range_expression ] ] 
+| constant_function_call 
+| constant_let_expression 
+| ( constant_mintypmax_expression )
+| constant_cast 
+| constant_assignment_pattern_expression 
+| type_reference40
+primary_literal ::= number | time_literal | unbased_unsized_literal | string_literal 
+// 39) genvar_identifier 在常量_primary 中只能在 genvar_expression 中合法。
+// 40) 在静态转换中，type_reference 常量_primary 作为 casting_type 是合法的。除了相等性/不等性和 case 相等性/不等性运算符外，不得使用 type_reference 常量_primary 与任何运算符。
+```
+---
+语法 11-8—min:typ:max 表达式的语法（摘自附录 A）
+
+SystemVerilog 模型通常为延迟表达式指定三个值。这三个值允许使用最小、典型或最大延迟值进行测试设计，称为 *min:typ:max 表达式*。
+
+在 min:typ:max 格式中指定的值可以用于表达式中。min:typ:max 格式可以用于表达式可以出现的任何地方。
+
+例如 1：以下示例显示了定义单个延迟值三元组的表达式。最小值是 `a+d`；典型值是 `b+e`；最大值是 `c+f`，如下所示：
+```verilog
+(a:b:c) + (d:e:f)
+```
+
+例如 2：下一个示例显示了用于指定 min:typ:max 格式值的典型表达式：
+```verilog
+val - (32'd 50: 32'd 75: 32'd 100)
+```
+
+## 11.13 Let 构造
+---
+```verilog
+assertion_item_declaration ::= // from A.2.10
+… 
+| let_declaration 
+let_declaration ::= 
+let let_identifier [ ( [ let_port_list ] ) ] = expression ;
+let_identifier ::= 
+identifier 
+let_port_list ::= 
+let_port_item {, let_port_item} 
+let_port_item ::= 
+{ attribute_instance } let_formal_type formal_port_identifier { variable_dimension } [ = expression ] 
+let_formal_type ::= 
+data_type_or_implicit 
+| untyped
+let_expression ::= 
+[ package_scope ] let_identifier [ ( [ let_list_of_arguments ] ) ] 
+let_list_of_arguments ::= 
+[ let_actual_arg ] {, [ let_actual_arg ] } {, . identifier ( [ let_actual_arg ] ) } 
+| . identifier ( [ let_actual_arg ] ) { , . identifier ( [ let_actual_arg ] ) } 
+let_actual_arg ::= 
+expression 
+primary ::= // from A.8.4
+… 
+| let_expression 
+… 
+```
+---
+语法 11-9—Let 语法（摘自附录 A）
+
+Let 声明定义了一个模板表达式（let 体），由其端口定制。Let 构造可以在其他表达式中实例化。
+
+Let 声明可用于定制，并且在许多情况下可以替代文本宏。Let 构造更安全，因为它具有局部作用域，而编译器指令的作用域在编译单元内是全局的。在包中包含 let 声明（请参见第 26 章）是实现设计代码的良好结构化定制的自然方法。
+
+例如 1：
+```verilog
+package pex_gen9_common_expressions;
+    let valid_arb(request, valid, override) = |(request & valid) || override;
+    ...
+endpackage
+
+module my_checker;
+    import pex_gen9_common_expressions::*;
+    logic a, b;
+    wire [1:0] req;
+    wire [1:0] vld;
+    logic ovr;
+    ...
+        if (valid_arb(.request(req), .valid(vld), .override(ovr))) begin
+            ...
+        end
+    ...
+endmodule
+```
+
+例如 2：
+```verilog
+let mult(x, y) = ($bits(x) + $bits(y))'(x * y);
+```
+
+就像属性和序列用作并发断言的模板一样（请参见 16.5），let 构造可以用作立即断言的模板。例如：
+```verilog
+let at_least_two(sig, rst = 1'b0) = rst || ($countones(sig) >= 2);
+logic [15:0] sig1;
+logic [3:0] sig2;
+
+always_comb begin
+    q1: assert (at_least_two(sig1));
+    q2: assert (at_least_two(~sig2));
+end
+```
+
+Let 的另一个预期用途是为标识符或子表达式提供快捷方式。例如：
+```verilog
+task write_value;
+    input logic [31:0] addr;
+    input logic [31:0] value;
+    ...
+endtask
+...
+let addr = top.block1.unit1.base + top.block1.unit2.displ;
+...
+write_value(addr, 0);
+```
+
+形式参数可以选择性地被类型化，并且也可以具有可选的默认值。如果 let 的形式参数被类型化，则类型应为事件或 16.6 中允许的类型之一。以下规则适用于类型化形式参数及其相应的实际参数，包括在 let 中声明的默认实际参数：
+ - 1) 如果形式参数的类型是事件，则实际参数应为 event_expression，并且对形式参数的每个引用应在可以写入 event_expression 的地方。
+ - 2) 否则，实际参数的自决结果类型应与形式参数的类型转换兼容（请参见 6.22.4）。在将实际参数替换为重写算法（请参见 F.4.1）中的形式参数引用之前，应将实际参数转换为形式参数的类型。
+
+在 let 中使用的变量，如果不是 let 的形式参数，则根据 let 声明所在的作用域中的作用域规则解析。在声明的作用域中，应在使用之前定义 let 体。不允许对 let 声明进行层次引用。
+
+通过将实际参数替换形式参数，来扩展 let 体。将执行语义检查以验证具有实际参数的扩展 let 体是否合法。替换的结果应用括号 (...) 括起来，以保留 let 体的计算优先级。不允许递归 let 实例化。
+
+Let 体可以包含采样值函数调用（请参见 16.9.3 和 16.9.4）。如果未显式指定时钟，则在实例化上下文中推断时钟，就像函数直接在实例化上下文中使用一样。如果需要时钟，但无法在实例化上下文中推断时钟，则应出错。
+
+Let 可以在以下任何地方声明：
+ - 模块
+ - 接口
+ - 程序
+ - 检查器
+ - 时钟块
+ - 包
+ - 编译单元作用域
+ - 生成块
+ - 顺序或并行块
+ - 子例程
+
+例如：
+
+`a)` 具有参数和无参数的 let。
+```verilog
+module m;
+    logic clk, a, b;
+    logic p, q, r;
+    
+    // 具有形式参数和 y 上的默认值的 let
+    let eq(x, y = b) = x == y;
+
+    // 没有参数，绑定到上面的 a, b
+    let tmp = a && b;
+    ...
+    a1: assert property (@(posedge clk) eq(p,q));
+    always_comb begin
+        a2: assert (eq(r)); // 使用 y 的默认值
+        a3: assert (tmp);
+    end
+endmodule : m
+```
+
+扩展 let 表达式后的有效代码：
+```verilog
+module m;
+    bit clk, a, b;
+    logic p, q, r;
+    
+    // let eq(x, y = b) = x == y;
+    // let tmp = a && b;
+    ...
+    a1: assert property (@(posedge clk) (m.p == m.q));
+    always_comb begin
+        a2: assert ((m.r == m.b)); // 使用 y 的默认值
+        a3: assert ((m.a && m.b));
+    end
+endmodule : m
+```
+
+`b)` let 参数发声明上下文绑定。
+```verilog
+module top;
+    logic x = 1'b1;
+    logic a, b;
+    let y = x;
+    ...
+    always_comb begin
+        // y 在 let 的声明上下文中绑定到前面的 x
+        bit x = 1'b0;
+        b = a | y;
+    end
+endmodule : top
+```
+
+扩展 let 表达式后的有效代码：
+```verilog
+module top;
+    bit x = 1'b1;
+    bit a;
+    // let y = x;
+    ...
+    always_comb begin
+        // y 在 let 的声明上下文中绑定到前面的 x
+        bit x = 1'b0;
+        b = a | (top.x);
+    end
+endmodule : top
+```
+
+`c)` 结构上下文（见 16.8）中的带 let 的序列（和属性）。
+```verilog
+module top;
+    logic a, b;
+    let x = a || b;
+    sequence s;
+        x ##1 b;
+    endsequence : s
+    ...
+endmodule : top
+```
+
+扩展 let 表达式后的有效代码：
+```verilog
+module top;
+    logic a, b;
+    // let x = a || b;
+    sequence s;
+        (top.a || top.b) ##1 top.b;
+    endsequence : s
+    ...
+endmodule : top
+```
+
+`d)` 在 generate 块中声明的 let。
+```verilog
+module m(...);
+    wire a, b;
+    wire [2:0] c;
+    wire [2:0] d;
+    wire e;
+    ...
+    for (genvar i = 0; i < 3; i++) begin : L0
+        if (i !=1) begin : L1
+            let my_let(x) = !x || b && c[i];
+            s1: assign d[2 – i] = my_let(a); // OK
+        end : L1
+    end : L0
+    s2: assign e = L0[0].L1.my_let(a); // 非法
+endmodule : m
+```
+
+语句 s1 变为两个语句 L0[0].L1.s1 和 L0[2].L1.s1，第一个是：
+```verilog
+assign d[2] = (!m.a || m.b && m.c[0]);
+```
+
+第二个是：
+```verilog
+assign d[0] = (!m.a || m.b && m.c[2]);
+```
+
+语句 s2 是非法的，因为它在层次结构上引用 let 表达式，而层次引用 let 表达式是不允许的。
+
+`e)` 具有类型参数的 let。
+```verilog
+module m(input clock);
+    logic [15:0] a, b;
+    logic c, d;
+    typedef bit [15:0] bits;
+    ...
+    let ones_match(bits x, y) = x == y;
+    let same(logic x, y) = x === y;
+
+    always_comb
+        a1: assert(ones_match(a, b));
+
+    property toggles(bit x, y);
+        same(x, y) |=> !same(x, y);
+    endproperty
+
+    a2: assert property (@(posedge clock) toggles(c, d));
+endmodule : m
+```
+
+在此示例中，let 表达式 ones_match 检查其参数的相同位是否设置为 1。由于在 let 声明中显式指定了形式参数为 2 状态类型 bit，所有具有未知逻辑值或高阻值的参数位都变为 0，因此比较捕获设置为 1 的位的匹配。let 表达式 same 测试其操作数的 case 相等性（请参见 11.4.6）。在属性 toggles 中实例化时，其实际参数将是 bit 类型。扩展 let 表达式后的有效代码：
+```verilog
+module m(input clock);
+    logic [15:0] a, b;
+    logic c, d;
+    typedef bit [15:0] bits;
+    ...
+    // let ones_match(bits x, y) = x == y;
+    // let same(logic x, y) = x === y;
+
+    always_comb
+        a1:assert((bits'(a) == bits'(b)));
+    
+    property toggles(bit x, y);
+        (logic'(x) === logic'(y)) |=> ! (logic'(x) === logic'(y));
+    endproperty
+
+    a2: assert property (@(posedge clock) toggles(c, d));
+endmodule : m
+```
+
+`f)` 在 let 中使用采样值函数。
+```verilog
+module m(input clock);
+    logic a;
+    let p1(x) = $past(x);
+    let p2(x) = $past(x,,,@(posedge clock));
+    let s(x) = $rose(x);
+    always_comb begin
+        a1: assert(p1(a));
+        a2: assert(p2(a));
+        a3: assert(s(a));
+    end
+    a4: assert property(@(posedge clock) p1(a));
+    ...
+endmodule : m
+```
+
+扩展 let 表达式后的有效代码：
+```verilog
+module m(input clock);
+    logic a;
+    // let p1(x) = $past(x);
+    // let p2(x) = $past(x,,,@(posedge clock));
+    // let s(x) = $rose(x);
+    always_comb begin
+        a1: assert(($past(a))); // 非法：无法推断时钟
+        a2: assert(($past(a,,,@(posedge clock))));
+        a3: assert(($rose(a)));
+    end
+    a4: assert property(@(posedge clock)($past(a))); // @(posedge clock) 被推断
+    ...
+endmodule : m
+```
