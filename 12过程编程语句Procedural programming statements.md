@@ -788,57 +788,79 @@ foreach( A [ i, j, k ] ) ...
 foreach( B [ q, r, , s ] ) ...
 ```
 
+在第一个 foreach 循环中，i 从 0 到 1，j 从 0 到 2，k 从 0 到 3。在第二个 foreach 循环中，q 从 5 到 1，r 从 0 到 3，s 从 2 到 1（跳过第三个索引的迭代）。
 
+如果在 foreach 循环的执行过程中更改了动态大小数组的维数，则结果是未定义的，并且可能导致生成无效的索引值。
 
+多个循环变量对应于嵌套循环，这些循环对给定的索引进行迭代。循环的嵌套由维度基数决定；外部循环对应于较低基数索引。在上面的第一个示例中，最外层循环对应于 i，最内层循环对应于 k。
 
+当循环变量用于除作为指定数组的索引之外的表达式时，它们会自动转换为与索引类型一致的类型。对于固定大小和动态大小数组，自动转换类型为 int。对于由特定索引类型索引的关联数组，自动转换类型为与索引类型相同的类型。要使用不同的类型，可以使用显式转换。
 
+### 12.7.4 while 循环
+*while 循环* 重复执行一个语句，只要控制表达式为真（12.4 中定义）。如果表达式在 while 循环开始时不为真，则语句将不会执行。
 
-
-
-The first foreach-loop causes i to iterate from 0 to 1, j from 0 to 2, and k from 0 to 3. The second foreachloop causes q to iterate from 5 to 1, r from 0 to 3, and s from 2 to 1 (iteration over the third index is
-skipped).
-If the dimensions of a dynamically sized array are changed while iterating over a foreach-loop construct, the
-results are undefined and may cause invalid index values to be generated. 
-Multiple loop variables correspond to nested loops that iterate over the given indices. The nesting of the
-loops is determined by the dimension cardinality; outer loops correspond to lower cardinality indices. In the
-first example above, the outermost loop iterates over i, and the innermost loop iterates over k.
-When loop variables are used in expressions other than as indices to the designated array, they are auto-cast
-into a type consistent with the type of index. For fixed-size and dynamic arrays, the auto-cast type is int.
-For associative arrays indexed by a specific index type, the auto-cast type is the same as the index type. To
-use different types, an explicit cast can be used.
-12.7.4 The while-loop 
-The while-loop repeatedly executes a statement as long as a control expression is true (as defined in 12.4). If
-the expression is not true at the beginning of the execution of the while-loop, the statement shall not be
-executed at all.
-The following example counts the number of logic 1 values in data:
+以下示例计算 data 中的逻辑 1 值的数量：
+```verilog
 begin : count1s
-logic [7:0] tempreg;
-count = 0;
-tempreg = data;
-while (tempreg) begin
-if (tempreg[0])
-count++;
-tempreg >>= 1;
+    logic [7:0] tempreg;
+    count = 0;
+    tempreg = data;
+    while (tempreg) begin
+        if (tempreg[0])
+            count++;
+        tempreg >>= 1;
+    end
 end
-end
-12.7.5 The do...while-loop 
-The do...while-loop differs from the while-loop in that a do...while-loop tests its control expression at the
-end of the loop. Loops with a test at the end are sometimes useful to save duplication of the loop body. 
-string s; 
+```
+
+### 12.7.5 do...while 循环
+*do...while 循环* 与 while 循环不同，它在循环体执行之后测试控制表达式。在结束进行测试有时候是有用的以便在循环体中避免重复的代码。
+```verilog
+string s;
 if ( map.first( s ) )
-do
-$display( "%s : %d\n", s, map[ s ] );
-while ( map.next( s ) );
-The condition can be any expression that can be treated as a Boolean. It is evaluated after the statement. 
-12.7.6 The forever-loop 
-The forever-loop repeatedly executes a statement. To avoid a zero-delay infinite loop, which could hang the
-simulation event scheduler, the forever loop should only be used in conjunction with the timing controls or
-the disable statement. For example: 
+    do
+        $display( "%s : %d\n", s, map[ s ] );
+    while ( map.next( s ) );
+```
+
+条件可以是任何可以作为布尔值处理的表达式。它在语句之后计算。
+
+### 12.7.6 forever 循环
+*forever 循环* 重复执行一个语句。为了避免零延迟无限循环，可能会挂起仿真事件调度器，forever 循环应该只与时间控制或 disable 语句一起使用。例如：
+```verilog
 initial begin
-clock1 <= 0;
-clock2 <= 0;
-fork
-forever #10 clock1 = ~clock1;
-#5 forever #10 clock2 = ~clock2;
-join
+    clock1 <= 0;
+    clock2 <= 0;
+    fork
+        forever #10 clock1 = ~clock1;
+        #5 forever #10 clock2 = ~clock2;
+    join
 end
+```
+
+## 12.8 跳转语句
+---
+```verilog
+jump_statement ::= // from A.6.5
+return [ expression ] ;
+| break ;
+| continue ;
+```
+---
+语法 12-6—跳转语句语法（摘自附录 A）
+
+SystemVerilog 提供了类似 C 的跳转语句 break、continue 和 return。
+```verilog
+break // 退出循环，与 C 中的 break 相同
+continue // 跳到循环的末尾，与 C 中的 continue 相同
+return expression // 退出函数
+return // 退出任务或 void 函数
+```
+
+continue 和 break 语句只能在循环中使用。continue 语句跳到循环的末尾并执行循环控制（如果存在）。break 语句跳出循环。
+
+continue 和 break 语句不能在 fork-join 块中使用以控制块外的循环。
+
+return 语句只能在子例程中使用。在返回值的函数中，return 语句应具有正确类型的表达式。
+
+注意：SystemVerilog 不包括 C 中的 goto 语句。
