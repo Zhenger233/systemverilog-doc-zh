@@ -388,8 +388,531 @@ endmodule
 
 在第三个时间步骤中，`b1` 中的失败不会看到刷新点，因此报告失败。在 `b2` 中，断言通过，因此不会报告失败。
 
+## 16.5 并发断言概述
+并发断言描述了跨时间的行为。与立即断言不同，评估模型基于时钟，因此仅在时钟节拍发生时评估并发断言。
 
+并发断言使用其表达式的采样值，除了禁用条件（见 16.15）和时钟事件。表达式采样在 16.5.1 中解释。并发断言在 Observed 区域中评估。
 
+### 16.5.1 采样
+并发断言和其他几个构造（例如检查器中的 always_ff 过程中引用的变量，见 17.5）对其表达式的值有特殊规则。在这些构造中对表达式的采样值称为 *采样值*。在大多数情况下，表达式的采样值是其在 Preponed 区域的值。然而，这个规则有几个重要的例外。以下是采样的正式定义。
+
+表达式的默认采样值定义如下：
+ - 静态变量的默认采样值是其声明中分配的值，或者在缺乏这样的分配时，是相应类型的默认值（见 6.8，表 6-7）。
+ - 任何其他变量或网络的默认采样值是相应类型的默认值（见 6.8，表 6-7）。例如，逻辑类型变量 y 的默认采样值是 1'bx。
+ - triggered 事件属性（见 15.5.3）和序列方法 triggered 和 matched 的默认采样值为 false（1'b0）。
+ - 表达式的默认采样值通过递归地使用其组成子表达式和变量的默认采样值来定义。
+
+默认采样值在定义表达式的采样值时使用，如下所示，并在时间 0 之前需要引用表达式的采样值时使用采样值函数（见 16.9.3）。
+
+变量采样值的定义基于变量采样值的定义。变量采样值的一般规则如下：
+ - 时间大于 0 的时间槽中的变量的采样值是该变量在该时间槽的 Preponed 区域中的值。
+ - 时间 0 的时间槽中的变量的采样值是其默认采样值。
+
+这个规则有以下例外：
+ - 自动变量（见 16.14.6）、局部变量（见 16.10）和活动自由检查器变量（见 17.7.2）的采样值是它们的当前值。然而，
+   - 当采样值函数引用活动自由检查器变量的过去或未来值时（见 16.9.3 和 16.9.4），这个值在相应的过去或未来时钟节拍的 Postponed 区域中被采样；
+   - 当采样值函数引用自动变量的过去或未来值时，将取当前自动变量的值。
+ - 如果变量是时钟块的输入变量，则变量应该通过 #1 步长采样由时钟块变量产生的采样值。时钟块变量的任何其他类型的采样都会导致错误。这在第 14 章中有解释。
+
+表达式的采样值定义如下：
+ - 由单个变量组成的表达式的采样值是该变量的采样值。
+ - const 强制转换表达式（见 6.24.1 和 16.14.6）的采样值定义为其参数的当前值。例如，如果 a 是一个变量，则 const'(a) 的采样值是 a 的当前值。当采样值函数引用 const 强制转换表达式的过去或未来值时，将取当前此表达式的值。
+ - triggered 事件属性和序列方法 triggered 和 matched（见 16.13.6）的采样值定义为事件属性或序列方法返回的当前值。当采样值函数引用事件属性或序列方法的过去或未来值时，将在相应的过去或未来时钟节拍的 Postponed 区域中采样此值。
+ - 任何其他表达式的采样值通过使用其参数的值递归地定义。例如，由 e1 和 e2 组成的表达式 e1 & e2 的采样值是 e1 和 e2 的采样值的按位 AND。特别地，如果表达式包含函数调用，为了评估此表达式的采样值，将在表达式评估时调用函数，并在表达式评估时使用其参数的采样值。例如，如果 a 是一个静态模块变量，s 是一个序列，f 是一个函数，则 f(a, s.triggered) 的采样值是 f 应用于 a 和 s.triggered 的采样值的结果，即从 Preponed 中取 a 的值。
+
+### 16.5.2 断言时钟
+并发断言规范中使用的时序模型基于时钟节拍，并使用时钟周期的广义概念。时钟的定义由用户明确指定，可以在一个表达式中与另一个表达式不同。
+
+*时钟节拍* 是一个原子时间点，本身不跨越时间段。时钟只在任何仿真时间点上打拍一次，并且在时钟节拍上采样的值用于评估并发断言。在断言中，采样值是时钟节拍上的变量的唯一有效值。图 16-1 显示了随着时钟的进行变量的值。变量 req 在时钟节拍 1 和 2 时的值为低。在时钟节拍 3 时，值被采样为高，并保持高直到时钟节拍 6。在时钟节拍 6 时，变量 req 的采样值为低，并保持低直到时钟节拍 9，包括时钟节拍 9。请注意，仿真值在时钟节拍 9 时转换为高。然而，在时钟节拍 9 时的采样值为低。
+![sample](sample.png)
+
+图 16-1—在仿真时间步骤中采样变量
+
+断言中的表达式始终与一个时钟定义相关，除了使用过程代码中的常量或自动值（见 16.14.6）。采样值用于评估值变化表达式或布尔子表达式，这些表达式用于确定序列的匹配。
+
+对于并发断言，以下声明适用：
+ - 定义的时钟行为无毛刺非常重要。否则，可能会采样错误的值。
+ - 如果在时钟表达式中出现的变量也在断言中的表达式中出现，则两个变量的值可能不同。变量的当前值用于时钟表达式，而变量的采样值用于断言中。
+
+控制序列评估的时钟表达式可以比只是一个信号名更复杂。例如，可以使用 (clk && gating_signal) 和 (clk iff gating_signal) 表达一个门控时钟。其他更复杂的表达式也是可能的。然而，为了验证系统的正确行为并尽可能接近真正的基于周期的语义，用户应确保时钟表达式无毛刺，并且在任何仿真时间上只转换一次。
+
+引用 `$global_clock`（见 14.14）被理解为引用 `global clocking` 声明中定义的 *时钟事件*。全局时钟与任何其他时钟事件一样。然而，在形式验证中，`$global_clock` 具有额外的意义，因为它被认为是主要的系统时钟（见 F.3.1）。因此，在以下示例中：
+```verilog
+global clocking @clk; endclocking
+    ...
+assert property(@$global_clock a);
+```
+
+断言说明 a 在全局时钟的每个节拍上都为真。这个断言在逻辑上等同于：
+```verilog
+assert property(@clk a);
+```
+
+并发断言的一个示例如下：
+```verilog
+base_rule1: assert property (cont_prop(rst,in1,in2)) $display("%m, passing"); 
+else $display("%m, failed");
+```
+
+关键字 `property` 将并发断言与立即断言区分开来。并发断言的语法在 16.14 中讨论。
+
+## 16.6 布尔表达式
+表达式的评估结果是布尔值，以 if 语句中的表达式的方式解释。换句话说，如果表达式评估为 X、Z 或 0，则解释为假。否则，为真。
+
+出现在并发断言中的表达式必须满足以下要求：
+ - 表达式的结果是与整数类型转换兼容的类型。子表达式不需要满足此要求，只要整体表达式与整数类型兼容即可。
+ - 动态数组、队列和关联数组的元素用于断言表达式的评估，可能在断言表达式评估之前从数组中删除，或者数组可能在断言表达式评估之前调整大小。这些用于断言表达式评估的特定数组元素应在断言的范围内继续存在，直到断言表达式评估完成。
+ - 出现在过程并发断言中的表达式可以引用 16.14.6.1 中描述的自动变量。否则，出现在并发断言中的表达式不得引用自动变量。
+ - 表达式不得引用非静态类属性或方法。
+ - 表达式不得引用 chandle 数据类型的变量。
+ - 具有局部变量作为 variable_lvalue 的序列匹配项可以使用 C 赋值、增量和减量运算符。否则，表达式的评估不得有任何副作用（例如，不允许增量和减量运算符）。
+ - 表达式中的函数不得包含输出或 ref 参数（const ref 是允许的）。
+ - 函数应为自动（或不保留状态信息）并且不得具有任何副作用。
+
+并发断言中应当小心访问大型数据结构，特别是大型动态数据结构。一些类型的访问可能需要创建整个数据结构的副本，这可能会导致显著的性能损失。以下示例说明了复制整个数据结构可能怎样出现。在 p1 中，只有一个字节的 q 必须由断言采样，而且该字节的位置是固定的。然而，在 p2 中，将有多个具有潜在不同 l_b 值的活动线程。这增加了确定要采样的 q 字节的困难，并且可能导致采样所有 q。
+```verilog
+bit a;
+integer b;
+byte q[$];
+
+property p1;
+    $rose(a) |-> q[0];
+endproperty
+
+property p2;
+    integer l_b;
+    ($rose(a), l_b = b) |-> ##[3:10] q[l_b];
+endproperty
+```
+
+在并发断言中出现布尔表达式的两个地方如下：
+ - 在序列或属性表达式中
+ - 在断言中推断的禁用条件中，指定在顶层 `disable iff` 子句中（见 16.12）或在默认 `disable iff` 声明中（见 16.15）
+
+用于定义序列或属性表达式中的布尔表达式应在所有变量的采样值上进行评估。前面的规则不适用于在时钟事件中的表达式（见 16.5）。
+
+在禁用条件中评估的表达式使用变量的当前值（而不是采样值），可能包含序列布尔方法 triggered。不得包含对局部变量或 matched 序列方法的引用。
+
+基于时间值执行检查的断言应在相同上下文捕获这些值。不建议在断言之外捕获时间。应在断言内部使用局部变量捕获时间值。以下示例说明了在不同上下文中捕获时间值可能会出现问题。在属性 p1 中，时间值 t 是在过程上下文中基于 count 的当前值捕获的。在断言内部，将时间值 t 与断言上下文中基于 count 的采样值由 `$realtime` 返回的时间值进行比较。在两个上下文中，`$realtime` 返回当前时间值。结果，捕获在不同上下文中的时间值的比较产生不一致的结果。不一致导致 p1 的计算检查 clk 的 8 个周期之间的时间量，而不是预期的 7 个周期。在属性 p2 中，两个时间值都在断言上下文中捕获。这种策略产生一致的结果。
+```verilog
+bit count[2:0];
+realtime t;
+
+initial count = 0;
+always @(posedge clk) begin
+    if (count == 0) t = $realtime; //capture t in a procedural context
+    count++;
+end
+
+property p1;
+    @(posedge clk)
+    count == 7 |-> $realtime – t < 50.5;
+endproperty
+
+property p2;
+    realtime l_t;
+    @(posedge clk)
+    (count == 0, l_t = $realtime) ##1 (count == 7)[->1] |-> 
+    $realtime – l_t < 50.5;
+endproperty
+```
+
+## 16.7 序列
+---
+```verilog
+sequence_expr ::= // from A.2.10
+cycle_delay_range sequence_expr { cycle_delay_range sequence_expr }
+| sequence_expr cycle_delay_range sequence_expr { cycle_delay_range sequence_expr }
+| expression_or_dist [ boolean_abbrev ] 
+| sequence_instance [ sequence_abbrev ] 
+| ( sequence_expr {, sequence_match_item } ) [ sequence_abbrev ] 
+| sequence_expr and sequence_expr 
+| sequence_expr intersect sequence_expr 
+| sequence_expr or sequence_expr 
+| first_match ( sequence_expr {, sequence_match_item} )
+| expression_or_dist throughout sequence_expr 
+| sequence_expr within sequence_expr 
+| clocking_event sequence_expr 
+cycle_delay_range ::= 
+## constant_primary 
+| ## [ cycle_delay_const_range_expression ]
+| ##[*]
+| ##[+]
+sequence_match_item ::= 
+operator_assignment 
+| inc_or_dec_expression 
+| subroutine_call 
+sequence_instance ::= 
+ps_or_hierarchical_sequence_identifier [ ( [ sequence_list_of_arguments ] ) ] 
+sequence_list_of_arguments ::= 
+[sequence_actual_arg] { , [sequence_actual_arg] } { , . identifier ( [sequence_actual_arg] ) } 
+| . identifier ( [sequence_actual_arg] ) { , . identifier ( [sequence_actual_arg] ) } 
+sequence_actual_arg ::= 
+event_expression
+| sequence_expr 
+boolean_abbrev ::= 
+consecutive_repetition 
+| non_consecutive_repetition
+| goto_repetition
+sequence_abbrev ::= consecutive_repetition 
+consecutive_repetition ::= 
+[* const_or_range_expression ]
+| [*]
+| [+]
+non_consecutive_repetition ::= [= const_or_range_expression ]
+goto_repetition ::= [-> const_or_range_expression ]
+const_or_range_expression ::= 
+constant_expression 
+| cycle_delay_const_range_expression 
+cycle_delay_const_range_expression ::= 
+constant_expression : constant_expression 
+| constant_expression : $
+expression_or_dist ::= expression [ dist { dist_list } ] 
+```
+---
+语法 16-3—序列语法（摘自附录 A）
+
+属性通常由顺序行为构建。`sequence` 功能提供了构建和操作顺序行为的能力。最简单的顺序行为是线性的。线性序列是递增时间的有限 SystemVerilog 布尔表达式列表。线性序列在连续时钟节拍的有限间隔上匹配，前提是第一个布尔表达式在第一个时钟节拍上为真，第二个布尔表达式在第二个时钟节拍上为真，依此类推，直到最后一个布尔表达式在最后一个时钟节拍上为真。单个布尔表达式是简单线性序列的一个示例，它在单个时钟节拍上匹配，前提是该布尔表达式在该时钟节拍上为真。
+
+更复杂的顺序行为由 SystemVerilog 序列描述。序列是 SystemVerilog 布尔表达式上的正则表达式，它简洁地指定了零个、有限多个或无限多个线性序列的集合。如果该集合中至少有一个线性序列在连续时钟节拍的有限间隔上匹配，则该序列在该间隔上匹配。
+
+属性可能涉及从不同时间开始的一个或多个顺序行为的检查。尝试评估序列是搜索序列的匹配的尝试，从特定时钟节拍开始搜索序列的匹配。为了确定是否存在这样的匹配，从特定时钟节拍开始评估适当的布尔表达式，并在特定时钟节拍开始的每个连续时钟节拍上继续评估，直到找到匹配或推断出不存在匹配。
+
+序列可以通过连接构成，类似于列表的连接。连接使用 `##` 指定从第一个序列的结束到第二个序列的开始的延迟。
+
+序列连接的语法如语法 16-4 所示。
+---
+```verilog
+sequence_expr ::= // from A.2.10
+cycle_delay_range sequence_expr { cycle_delay_range sequence_expr }
+| sequence_expr cycle_delay_range sequence_expr { cycle_delay_range sequence_expr }
+... 
+cycle_delay_range ::= 
+## constant_primary 
+| ## [ cycle_delay_const_range_expression ]
+| ##[*]
+| ##[+]
+cycle_delay_const_range_expression ::= 
+constant_expression : constant_expression 
+| constant_expression : $
+```
+---
+语法 16-4—序列连接语法（摘自附录 A）
+
+在此语法中，以下语句适用：
+ - `constant_primary` 是一个 `constant_expression`，在编译时计算，应产生整数值。此外，`constant_expression` 和 `cycle_delay_const_range_expression` 中的边界只能是 0 或更大。
+ - `$` 标记用于指示仿真结束。对于形式验证工具，`$` 用于指示有限但无界的范围。
+ - `##[*]` 用作 `##[0:$]` 的等效表示。
+ - `##[+]` 用作 `##[1:$]` 的等效表示。
+ - 当使用两个表达式指定范围时，第二个表达式应大于或等于第一个表达式。
+ - 在 `cycle_delay_range` 中，`constant_primary` 不得包含不是 `constant_expression` 的 `constant_mintypmax_expression`。
+
+序列出现的上下文决定了何时评估序列。序列中的第一个表达式在触发序列评估的表达式之后的第一个时钟节拍上检查。序列中的每个后续元素（如果有）在下一个连续时钟节拍上检查。
+
+`##` 后跟数字或范围指定从当前时钟节拍到序列开始之间的延迟。延迟 `##1` 表示接下来的序列的开始比当前时钟节拍晚一个时钟节拍。延迟 `##0` 表示接下来序列的开始时刻与当前时钟节拍相同。
+
+当用于两个序列之间的连接时，延迟是从第一个序列的结束到第二个序列的开始。延迟 `##1` 表示第二个序列的开始比第一个序列的结束晚一个时钟周期。delay ##0表示第二个序列的开始时间与第一个序列的结束时间相同。
+
+下面是一些延迟表达式的示例。`` `true `` 是一个布尔表达式，总是评估为 true，并用于视觉清晰度。它可以定义如下：
+```verilog
+`define true 1
+
+##0 a // means a
+##1 a // means `true ##1 a
+##2 a // means `true ##1 `true ##1 a
+##[0:3]a // means (a) 或 (`true ##1 a) 或 (`true ##1 `true ##1 a) 或 (`true ##1 `true ##1 `true ##1 a)
+a ##2 b // means a ##1 `true ##1 b
+```
+
+序列
+```verilog
+req ##1 gnt ##1 !req
+```
+
+指定 req 在当前时钟节拍上为 true，gnt 在第一个后续时钟节拍上为 true，req 在此后的下一个时钟节拍上为 false。`##1` 运算符指定一个时钟节拍的间隔。可以指定超过一个时钟节拍的延迟，如下所示：
+```verilog
+req ##2 gnt
+```
+
+这指定 req 在当前时钟节拍上为 true，gnt 在第二个后续时钟节拍上为 true，如图 16-2 所示。
+![concatenation](concatenation.png)
+
+图 16-2—序列的连接
+
+以下指定信号 b 在信号 a 之后的第 N 个时钟节拍上为 true：
+```verilog
+a ##N b // check b on the Nth sample
+```
+
+为了指定重叠序列的连接，其中一个序列的结束点与下一个序列的开始点重合，使用值 0，如下所示：
+```verilog
+a ##1 b ##1 c // 第一个序列 seq1
+d ##1 e ##1 f // 第二个序列 seq2
+(a ##1 b ##1 c) ##0 (d ##1 e ##1 f) // 重叠连接
+```
+
+在前面的示例中，c 必须在 seq1 的结束点为 true，d 必须在 seq2 的开始点为 true。与 0 时钟节拍延迟连接时，c 和 d 必须在同一时间点为 true，导致等效于以下内容：
+```verilog
+a ##1 b ##1 c&&d ##1 e ##1 f
+```
+
+应该注意，不能使用连接操作来表达序列之间的其他形式的重叠。
+
+在范围内的延迟可以指定为时间窗口，如下所示：
+```verilog
+req ##[4:32] gnt
+```
+
+在前面的情况下，req 必须在当前时钟节拍上为 true，gnt 必须在当前时钟节拍之后的第 4 到 32 个时钟节拍之间的某个时钟节拍上为 true。
+
+时间窗口可以扩展到有限但无界的范围，如下所示：
+```verilog
+req ##[4:$] gnt
+```
+
+序列可以通过连接到 `` `true `` 无条件地扩展。
+```verilog
+a ##1 b ##1 c ##3 `true
+```
+
+在满足信号 c 之后，序列长度通过三个时钟节拍扩展。当通过组合较简单的序列构建复杂序列时，可能需要调整序列的长度。
+
+## 16.8 声明序列
+命名的 `sequence` 可以在以下情况下声明：
+ - 模块
+ - 接口
+ - 程序
+ - 时钟块
+ - 包
+ - 编译单元范围
+ - 检查器
+ - 生成块
+
+命名序列使用语法 16-5 声明。
+---
+```verilog
+assertion_item_declaration ::= // from A.2.10
+... 
+| sequence_declaration 
+sequence_declaration ::= 
+sequence sequence_identifier [ ( [ sequence_port_list ] ) ] ;
+{ assertion_variable_declaration } 
+sequence_expr [ ; ] 
+endsequence [ : sequence_identifier ] 
+sequence_port_list ::= 
+sequence_port_item {, sequence_port_item} 
+sequence_port_item ::= 
+{ attribute_instance } [ local [ sequence_lvar_port_direction ] ] sequence_formal_type 
+ formal_port_identifier {variable_dimension} [ = sequence_actual_arg ] 
+sequence_lvar_port_direction ::= input | inout | output
+sequence_formal_type ::= 
+data_type_or_implicit 
+| sequence
+| untyped
+formal_port_identifier ::= identifier // from A.9.3
+sequence_instance ::= // from A.2.10
+ps_or_hierarchical_sequence_identifier [ ( [ sequence_list_of_arguments ] ) ] 
+sequence_list_of_arguments ::= 
+[sequence_actual_arg] { , [sequence_actual_arg] } { , . identifier ( [sequence_actual_arg] ) } 
+| . identifier ( [sequence_actual_arg] ) { , . identifier ( [sequence_actual_arg] ) } 
+sequence_actual_arg ::= 
+event_expression 
+| sequence_expr 
+assertion_variable_declaration ::= 
+var_data_type list_of_variable_decl_assignments ;
+```
+---
+语法 16-5—声明序列语法（摘自附录 A）
+
+命名序列可以在可选的 `sequence_port_list` 中声明形式参数。
+
+形式参数可以通过在 formal_port_identifier 之前指定类型来进行类型化。如果在端口列表中指定类型，则该类型适用于在类型之后和下一个类型之前指定的所有形式参数的标识符。有关指定和使用类型化形式参数的规则在 16.8.1 中讨论。
+
+有关指定和使用本地变量形式参数的规则在 16.8.2 中讨论。
+
+如果在端口列表中 formal_port_identifier 之前未指定类型，则形式参数被称为 *无类型*。无类型形式参数没有默认类型。
+
+序列的支持数据类型为断言表达式中允许的操作数的类型（见 16.6）和关键字 `untyped`。
+
+默认实际参数可以在关联的声明分配中指定。default_expression 在包含序列声明的范围中解析。对于类型化形式参数的默认实际参数的类型要求在 16.8.1 中描述。无类型形式参数的默认实际参数的类型可以是任何类型，只要其替换结果是有效序列，如重写算法中描述的那样（见 F.4.1）。
+
+形式参数可以在命名序列的声明体中引用。对形式参数的引用可以写在各种语法实体的位置，例如：
+ - 标识符
+ - 表达式
+ - sequence_expr
+ - event_expression
+ - 在 cycle_delay_const_range_expression 中的终止符 `$`
+
+命名序列可以通过引用其名称来实例化。引用可以是分层名称（见 23.6）。命名序列可以在任何可以写入 sequence_expr 的地方实例化，包括在其声明之前。命名序列也可以作为 sequence_method_call（见 16.9.11，16.13.5）的一部分或作为 event_expression（见 9.4.2.4）实例化。如果从其实例化导致命名序列之间的循环依赖，则会发生错误。如果从其实例化导致命名序列之间的循环依赖，则会发生错误。命名序列之间存在循环依赖，当且仅当有向图中存在一个循环，该循环的节点为命名序列，其边由以下规则定义：一个命名序列和另一个命名序列之间有一条有向边，当且仅当：要么第一个命名序列在其声明中实例化了第二个命名序列（包括在默认实际参数声明中实例化），要么在实际参数中存在第一个命名序列实例实例化了第二个命名序列。
+
+在命名序列的实例中，可以将实际参数传递给形式参数。实例应为每个没有声明默认实际参数的形式参数列表中的实际参数提供一个实际参数。实例可以为声明了默认实际参数的形式参数提供实际参数，从而覆盖默认值。实际参数列表中的实际参数可以按名称或按位置绑定到形式参数。
+
+在实例的实际参数列表中，终止符 `$` 可以是一个实际参数，可以声明为默认实际参数或在实例的实际参数列表中传递。如果 `$` 是一个实际参数，则相应的形式参数应为无类型，并且其引用应该是 cycle_delay_const_range_expression 中的上界，或者应该是命名序列的实例中的实际参数。
+
+如果命名序列的实例在本地变量的作用域内（见 16.10），则实例的实际参数列表中的实际参数可以引用本地变量。
+
+在命名序列的声明中出现的除形式参数之外的名称，包括出现在默认实际参数中的名称，应根据命名序列声明的作用域中的作用域规则进行解析。在实例的实际参数列表中出现的名称应根据实例的作用域中的作用域规则进行解析。
+
+命名序列的实例的顺序行为和匹配语义与通过 F.4.1 中定义的重写算法从命名序列的声明体中获得的扁平序列相同。重写算法将实际参数替换为声明体中对应形式参数的引用。重写算法本身不考虑名称解析，并假定在替换实际参数之前已解析名称。如果扁平序列不合法，则实例不合法，并且会发生错误。
+
+在重写算法中，将实际参数替换为对应无类型形式参数的引用会将实际参数保留为表达式项。在替换对应无类型形式参数的引用时，实际参数应该在替换之前被括号括起来，并且应该在替换之前被转换为其自我确定的类型。除非满足以下条件之一，否则在替换对应无类型形式参数的引用时，实际参数应该在替换之前被括号括起来，并且应该在替换之前被转换为其自我确定的类型：
+ - 实际参数是 `$`。
+ - 实际参数是 variable_lvalue。
+
+如果重写算法的结果是无效序列，则会发生错误。
+
+例如，对于无类型的形式参数的引用可能出现在 cycle_delay_range、boolean_abbrev 或 sequence_abbrev（见 16.9.2）的规范中，只有在实际参数是建立时常量时才能出现。以下示例说明了形式参数的使用：
+```verilog
+sequence delay_example(x, y, min, max, delay1);
+    x ##delay1 y[*min:max];
+endsequence
+
+// 合法
+a1: assert property (@(posedge clk) delay_example(x, y, 3, $, 2));
+
+int z, d;
+
+// 非法：z 和 d 不是建立时常量
+a2_illegal: assert property (@(posedge clk) delay_example(x, y, z, $, d));
+```
+
+下面的示例中，命名序列 s1 和 s2 在 clk 的连续 `posedge` 事件上评估。命名序列 s3 在 clk 的连续 `negedge` 事件上评估。命名序列 s4 在 clk 的连续交替 `posedge` 和 `negedge` 事件上评估。
+```verilog
+sequence s1;
+    @(posedge clk) a ##1 b ##1 c;
+endsequence
+
+sequence s2;
+    @(posedge clk) d ##1 e ##1 f;
+endsequence
+
+sequence s3;
+    @(negedge clk) g ##1 h ##1 i;
+endsequence
+
+sequence s4;
+    @(edge clk) j ##1 k ##1 l;
+endsequence
+```
+
+命名序列声明的另一个示例，其中包括参数，如下所示：
+```verilog
+sequence s20_1(data,en);
+    (!frame && (data==data_bus)) ##1 (c_be[0:3] == en);
+endsequence
+```
+
+命名序列 s20_1 没有指定时钟。在这种情况下，时钟将从某些外部源（例如 `property` 或 `assert` 语句）继承。实例化命名序列的示例如下：
+```verilog
+sequence s;
+    a ##1 b ##1 c;
+endsequence
+
+sequence rule;
+    @(posedge sysclk)
+    trans ##1 start_trans ##1 s ##1 end_trans;
+endsequence
+```
+
+前面示例中的命名序列 rule 等效于以下内容：
+```verilog
+sequence rule;
+    @(posedge sysclk)
+    trans ##1 start_trans ##1 (a ##1 b ##1 c) ##1 end_trans;
+endsequence
+```
+
+以下示例说明了命名序列 s1 和 s2 之间的非法循环依赖：
+```verilog
+sequence s1;
+    @(posedge sysclk) (x ##1 s2);
+endsequence
+
+sequence s2;
+    @(posedge sysclk) (y ##1 s1);
+endsequence
+```
+
+### 16.8.1 序列声明中的类型化形式参数
+序列的形式参数指定的数据类型可以是关键字 `untyped`。如果数据类型是 `untyped`，形式参数应当是无类型的（见 16.8）。绑定实际参数表达式到 `untyped` 形式参数的语义应当和无类型形式一样。在形式参数列表中如果无类型形式参数跟数据类型，应当使用关键字 `untyped`。
+
+如果命名序列的形式参数是类型化的，那么类型应当是 `sequence` 或者 16.6 中允许的类型之一。以下规则适用于类型化形式参数及其对应的实际参数，包括在命名序列中声明的默认实际参数：
+ - 如果形式参数是序列类型，那么实际参数应当是 sequence_expr。对于序列类型的形式参数的引用，应当在 sequence_expr 可以写入的地方，或者作为触发和匹配的序列方法的操作数。
+ - 如果形式参数是事件类型，那么实际参数应当是 event_expression，并且每个对形式参数的引用应当在 event_expression 可以写入的地方。
+ - 否则，实际参数的自我确定的结果类型应当和形式参数的类型是强制兼容的。如果实际参数是 variable_lvalue，那么对形式参数的引用应当被认为是形式参数的类型，任何对形式参数的赋值应当被认为是从形式参数到实际参数的后续赋值。如果实际参数不是 variable_lvalue，那么实际参数应当被转换为形式参数的类型，然后在重写算法中替换对形式参数的引用（见 F.4.1）。
+
+例如，布尔表达式可以作为实际参数传递给 `sequence` 类型的形式参数，因为布尔表达式是 sequence_expr。类型是 sequence的形式参数，不可以作为 goto_repetition 的 sequence_expr 的操作数引用，无论对应的实际参数是什么，因为 sequence_expr 不能写入那个位置。
+
+在 sequence_match_item（见 16.10）中的对类型化形式参数的引用不得作为 operator_assignment 或 inc_or_dec_expression 的 variable_lvalue，除非形式参数是本地变量参数（见 16.8.2，16.12.19）。
+
+以下是声明形式参数的两个示例。s1 的所有形式参数都是无类型的。s2 的形式参数 w 和 y 是无类型的，而形式参数 x 是 bit 类型。
+```verilog
+sequence s1(w, x, y);
+    w ##1 x ##[2:10] y;
+endsequence
+
+sequence s2(w, y, bit x);
+    w ##1 x ##[2:10] y;
+endsequence
+```
+
+以下 s1 和 s2 的实例是等效的：
+```verilog
+s1(.w(a), .x(bit'(b)), .y(c))
+s2(.w(a), .x(b), .y(c))
+```
+
+在上面的示例 s2 中，如果 b 恰好是 8 位宽，则它将被截断为 bit，因为它被传递给了 bit 类型的形式参数。类似地，如果将 bit 类型的表达式作为实际参数传递给 byte 类型的形式参数，那么表达式将被扩展为 byte。
+
+如果对类型化形式参数的引用出现在 cycle_delay_range、boolean_abbrev 或 sequence_abbrev（见 16.9.2）的规范中，则形式参数的类型应当是 shortint、int 或 longint。以下示例说明了形式参数的使用：
+```verilog
+sequence delay_arg_example (max, shortint delay1, delay2, min);
+    x ##delay1 y[*min:max] ##delay2 z;
+endsequence
+
+parameter my_delay=2;
+cover property (delay_arg_example($, my_delay, my_delay-1, 3));
+```
+
+前面示例中的 cover property 等效于以下内容：
+```verilog
+cover property (x ##2 y[*3:$] ##1 z);
+```
+
+以下是一个具有事件类型的形式参数的示例：
+```verilog
+sequence event_arg_example (event ev);
+    @(ev) x ##1 y;
+endsequence
+
+cover property (event_arg_example(posedge clk));
+```
+
+前面示例中的 cover property 等效于以下内容：
+```verilog
+cover property (@(posedge clk) x ##1 y);
+```
+
+如果意图是将一个表达式作为实际参数传递，以便与 edge_identifier 结合创建 event_expression，则形式参数不应该是事件类型。以下示例说明了这种用法：
+```verilog
+sequence event_arg_example2 (reg sig);
+    @(posedge sig) x ##1 y;
+endsequence
+
+cover property (event_arg_example2(clk));
+```
+
+前面示例中的 cover property 等效于以下内容：
+```verilog
+cover property (@(posedge clk) x ##1 y);
+```
+
+另一个示例，其中使用本地变量来采样形式参数，显示了如何获得“按值传递”的效果。目前不支持按值传递作为参数传递模式。
+```verilog
+sequence s(bit a, bit b);
+    bit loc_a;
+    (1'b1, loc_a = a;
+```
 
 
 
