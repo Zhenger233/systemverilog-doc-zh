@@ -424,7 +424,7 @@ endmodule
 并发断言规范中使用的时序模型基于时钟节拍，并使用时钟周期的广义概念。时钟的定义由用户明确指定，可以在一个表达式中与另一个表达式不同。
 
 *时钟节拍* 是一个原子时间点，本身不跨越时间段。时钟只在任何仿真时间点上打拍一次，并且在时钟节拍上采样的值用于评估并发断言。在断言中，采样值是时钟节拍上的变量的唯一有效值。图 16-1 显示了随着时钟的进行变量的值。变量 req 在时钟节拍 1 和 2 时的值为低。在时钟节拍 3 时，值被采样为高，并保持高直到时钟节拍 6。在时钟节拍 6 时，变量 req 的采样值为低，并保持低直到时钟节拍 9，包括时钟节拍 9。请注意，仿真值在时钟节拍 9 时转换为高。然而，在时钟节拍 9 时的采样值为低。
-![sample](sample.png)
+![16-1](16-1.png)
 
 图 16-1—在仿真时间步骤中采样变量
 
@@ -635,7 +635,7 @@ req ##2 gnt
 ```
 
 这指定 req 在当前时钟节拍上为 true，gnt 在第二个后续时钟节拍上为 true，如图 16-2 所示。
-![concatenation](concatenation.png)
+![16-2](16-2.png)
 
 图 16-2—序列的连接
 
@@ -911,12 +911,1156 @@ cover property (@(posedge clk) x ##1 y);
 ```verilog
 sequence s(bit a, bit b);
     bit loc_a;
-    (1'b1, loc_a = a;
+    (1'b1, loc_a = a) ##0 
+    (t == loc_a) [*0:$] ##1 b; 
+endsequence
+```
+
+### 16.8.2 序列声明中的本地变量形式参数
+本节描述声明本地变量形式参数的机制和针对它们的用法规则。本地变量形式参数是局部变量的特殊情况（见 16.10）。
+
+命名序列的形式参数可以通过在端口项中指定关键字 `local`，后面可以选择指定方向 `input`、`inout` 或 `output` 来指定为本地变量参数。如果未显式指定方向，则应从先前的参数中推断出方向 `input`。如果在端口项中指定了关键字 `local`，则应在该端口项中显式指定该参数的类型，并且不应从先前的参数中推断出该参数的类型。本地变量参数的类型应当是 16.6 中允许的类型之一。如果在端口项中指定了 input、inout 或 output 中的一个，则应在该端口项中指定关键字 local。
+
+将形式参数指定为给定方向和类型的本地变量参数应用于端口列表中的后续标识符，只要后续端口项中没有指定关键字 `local` 或显式类型。换句话说，如果端口项仅包含标识符，并且最近的显式指定了类型的参数也指定了关键字 local，则该端口项是一个本地变量参数，其方向和类型与该前面参数相同。
+
+如果本地变量形式参数的方向是 input，则可以在端口项的可选声明赋值中为该参数指定默认实际参数，受 16.8 中描述的默认实际参数的规则约束。对于方向为 `inout` 或 `output` 的本地变量参数，不得为该参数指定默认实际参数。
+
+以下是声明使用本地变量形式参数的命名序列的合法示例：
+```verilog
+logic b_d, d_d;
+sequence legal_loc_var_formal (
+    local inout logic a,
+    local logic b = b_d, // 推断为 input，默认实际参数 b_d
+    c, // 推断为 local input logic，没有默认实际参数
+    d = d_d, // 推断为 local input logic，默认实际参数 d_d
+    logic e, f // e 和 f 不是本地变量形式参数
+);
+    logic g = c, h = g || d;
+    ...
+endsequence
+```
+
+以下是声明使用本地变量形式参数的命名序列的非法示例：
+```verilog
+sequence illegal_loc_var_formal (
+    output logic a, // 非法：必须指定 local 方向
+    local inout logic b,
+    c = 1'b0, // 对 inout 指定默认实际参数是非法的
+    local d = expr, // 非法：必须显式指定类型
+    local event e, // 非法：event 是 16.6 中不允许的类型
+    local logic f = g // 非法：g 不得引用下面的本地变量，必须从上面的声明向上解析
+);
+    logic g = b;
+    ...
+endsequence
+```
+
+一般来说，本地变量形式参数的行为与在 assertion_variable_declaration 中声明的本地变量相同。16.10 中对分配给和引用本地变量的规则，包括本地变量流的规则，适用于本地变量形式参数，使用以下规定：
+ - 没有进一步规定，术语 *本地变量* 应当指本地变量形式参数或在 assertion_variable_declaration 中声明的本地变量。
+ - 在每次对命名序列的实例的评估尝试开始时，将为其每个本地变量形式参数创建一个新副本。
+ - 具有方向 `input` 或 `inout` 的本地变量形式参数应当像具有声明赋值的 assertion_variable_declaration 中声明的本地变量一样处理。本地变量形式参数的初始值由实例的相关实际参数提供。实际参数的自我确定的结果类型应当与本地变量形式参数的类型是强制兼容的（见 6.22.4）。实际参数的值应当在分配给本地变量形式参数之前转换为本地变量形式参数的类型。这种分配被称为本地变量形式参数的 *初始化赋值*。应当在初始化 assertion_variable_declaration 中声明的所有本地变量之前初始化所有输入和 inout 本地变量形式参数。对 assertion_variable_declaration 中声明的本地变量的声明赋值的表达式可以引用方向为 `input` 或 `inout` 的本地变量形式参数。
+ - 如果 `inout` 或 `output` 方向的本地变量形式参数绑定到实例的参数列表中的实际参数，并且实际参数引用本地变量，则如果在实例的上下文中引用时该本地变量未分配，则在该实例的上下文中引用该本地变量是错误的。
+ - 具有方向 `output` 的本地变量形式参数在实例的评估尝试开始时未分配。
+ - 绑定到 `inout` 或 `output` 方向的本地变量形式参数的整个实际参数表达式本身应当是对其类型与本地变量形式参数的类型是强制兼容的本地变量的引用。如果将对同一本地变量的引用绑定为两个或更多方向为 `inout` 或 `output` 的本地变量形式参数的实际参数，则是错误的。如果存在一个匹配的命名序列，那么在实例的完成时，如果 `inout` 或 `output` 方向的本地变量形式参数未分配，则是错误的。在命名序列实例匹配完成时，input 或 output 本地变量形式参数的值应当被转换并赋值为引用相关实际参数的本地变量的类型。如果命名序列实例的多个线程的求值匹配，那么多个线程的求值将在实例化上下文中继续，每个线程都有自己的实际参数局部变量的副本。对于命名序列实例的每个匹配线程，在该线程的匹配完成时，该线程中的局部变量形式参数的值应转换并分配为实际参数局部变量的关联副本的类型。
+ - 有 input 或 output 本地变量形式参数的命名序列实例有空匹配是错误的。
+ - 应用任何序列方法 triggered 或 matched 到有 input 或 inout 本地变量形式参数的命名序列实例是错误的。
+
+以下示例说明了本地变量形式参数的使用：
+```verilog
+sequence sub_seq2(local inout int lv);
+    (a ##1 !a, lv += data_in)
+    ##1 !b[*0:$] ##1 b && (data_out == lv);
+endsequence
+
+sequence seq2;
+    int v1;
+    (c, v1 = data)
+    ##1 sub_seq2(v1) // lv is initialized by assigning it the value of v1;
+    // when the instance sub_seq2(v1) matches, v1 is
+    // assigned the value of lv 
+    ##1 (do1 == v1);
+endsequence
+```
+
+seq2 的匹配行为等效于 seq2_inlined，如下所示：
+```verilog
+sequence seq2_inlined;
+    int v1, lv;
+    (c, v1 = data) ##1
+    (
+        (1, lv = v1) ##0
+        (a ##1 !a, lv += data_in)
+        ##1 (!b[*0:$] ##1 b && (data_out == lv), v1 = lv) 
+    )
+    ##1 (do1 == v1);
+endsequence
+```
+
+无类型参数提供了将本地变量传递给子序列实例的另一种机制，包括将本地变量分配给子序列中的本地变量，并在实例化上下文中引用分配的值（见 16.10）。
+
+## 16.9 序列操作
+### 16.9.1 操作符优先级
+操作符优先级和结合性列在表 16-1 中。最高优先级首先列出。
+
+表 16-1—操作符优先级和结合性
+| SystemVerilog 表达式操作符 | 结合性 |
+| --- | --- |
+| `[* ]` `[= ]` `[-> ]` | — |
+| `##` | 左 |
+| `throughout` | 右 |
+| `within` | 左 |
+| `intersect` | 左 |
+| `and` | 左 |
+| `or` | 左 |
+
+### 16.9.2 序列中的重复
+序列重复的语法如 Syntax 16-6 所示。
+---
+```verilog
+sequence_expr ::= // from A.2.10
+...
+| expression_or_dist [ boolean_abbrev ] 
+| sequence_instance [ sequence_abbrev ] 
+| ( sequence_expr {, sequence_match_item} ) [ sequence_abbrev ] 
+... 
+boolean_abbrev ::= 
+consecutive_repetition 
+| non_consecutive_repetition
+| goto_repetition
+sequence_abbrev ::= consecutive_repetition 
+consecutive_repetition ::= 
+[* const_or_range_expression ]
+| [*]
+| [+]
+non_consecutive_repetition ::= [= const_or_range_expression ]
+goto_repetition ::= [-> const_or_range_expression ]
+const_or_range_expression ::= 
+constant_expression 
+| cycle_delay_const_range_expression 
+cycle_delay_const_range_expression ::= 
+constant_expression : constant_expression 
+| constant_expression : $
+```
+---
+语法 16-6—序列重复语法（摘自附录 A）
+
+重复的迭代次数可以通过精确计数或需要落在有限范围内来指定。如果通过精确计数指定，则迭代次数由非负整数常量表达式定义。如果需要落在有限范围内，则最小迭代次数由非负整数常量表达式定义；最大迭代次数由非负整数常量表达式定义，或者是 `$`，表示有限但无界的最大值。
+
+如果最小和最大迭代次数都由非负整数常量表达式定义（见 11.2.1），则最小数应小于或等于最大数。提供了以下三种重复：
+ - *连续重复*（`[* const_or_range_expression ]`）：连续重复指定操作数序列的有限次迭代匹配，从一个匹配的结束到下一个匹配的开始延迟一个时钟节拍。整体重复序列在操作数的最后一个迭代匹配结束时匹配。`[*]` 是 `[*0:$]` 的等效表示，`[+]` 是 `[*1:$]` 的等效表示。
+ - *跳转重复*（`[-> const_or_range_expression ]`）：跳转重复指定操作数布尔表达式的有限次迭代匹配，从一个操作数的匹配到下一个连续匹配之间的一个或多个时钟节拍延迟，且在两个匹配之间没有严格匹配的操作数。整体重复序列在操作数的最后一个迭代匹配结束时匹配。
+ - *非连续重复*（`[= const_or_range_expression ]`）：非连续重复指定操作数布尔表达式的有限次迭代匹配，从一个操作数的匹配到下一个连续匹配之间的一个或多个时钟节拍延迟，且在两个匹配之间没有严格匹配的操作数。整体重复序列在操作数的最后一个迭代匹配之后，但在任何后续操作数的匹配之前匹配。
+
+序列内的子序列的连续重复的效果可以通过显式迭代子序列来实现，如下所示：
+```verilog
+a ##1 b ##1 b ##1 b ##1 c
+```
+
+使用连续重复操作符 `[*3]`，表示三次迭代，可以更简洁地指定这种顺序行为：
+```verilog
+a ##1 b [*3] ##1 c
+```
+
+连续重复指定操作数序列必须匹配指定次数。连续重复操作符 `[*N]` 指定操作数序列必须连续匹配 N 次。例如：
+```verilog
+a [*3] // 等价于 a ##1 a ##1 a
+```
+
+使用 0 作为重复次数，将产生一个空序列，如下所示：
+```verilog
+a [*0]
+```
+
+空序列是一个在零个时钟节拍上匹配的序列，不匹配任何正数时钟节拍。以下规则适用于连接具有空序列的序列。空序列表示为 empty，序列表示为 seq。
+ - `(empty ##0 seq)` 不会产生匹配。
+ - `(seq ##0 empty)` 不会产生匹配。
+ - `(empty ##n seq)`，其中 n 大于 0，等价于 `(##(n-1) seq)`。
+ - `(seq ##n empty)`，其中 n 大于 0，等价于 `` (seq ##(n-1) `true) ``。
+
+例如：
+```verilog
+b ##1 ( a[*0] ##0 c)
+```
+
+不会产生序列的匹配。例如：
+```verilog
+b ##1 a[*0:1] ##2 c
+```
+
+等价于
+```verilog
+(b ##2 c) or (b ##1 a ##2 c)
+```
+
+语法允许延迟和重复在同一个序列中组合。以下情况都是允许的：
+```verilog
+`true ##3 (a [*3]) // 等价于 `true ##1 `true ##1 `true ##1 a ##1 a ##1 a
+(`true ##2 a) [*3] // 等价于 (`true ##2 a) ##1 (`true ##2 a) ##1
+// (`true ##2 a)，这意味着 `true ##1 `true
+##1
+// a ##1 `true ##1 `true ##1 a ##1 `true ##1 `true ##1 a
+```
+
+序列可以重复如下：
+```verilog
+(a ##2 b) [*5]
+```
+
+这等价于
+```verilog
+(a ##2 b ##1 a ##2 b ##1 a ##2 b ##1 a ##2 b ##1 a ##2 b)
+```
+
+重复的范围最小最大次数可以通过连续重复操作符 `[* min:max]` 来表示。
+
+例如：
+```verilog
+(a ##2 b)[*1:5]
+```
+
+等价于
+```verilog
+(a ##2 b)
+or (a ##2 b ##1 a ##2 b)
+or (a ##2 b ##1 a ##2 b ##1 a ##2 b)
+or (a ##2 b ##1 a ##2 b ##1 a ##2 b ##1 a ##2 b)
+or (a ##2 b ##1 a ##2 b ##1 a ##2 b ##1 a ##2 b ##1 a ##2 b)
+```
+
+类似地，
+```verilog
+(a[*0:3] ##1 b ##1 c)
+```
+
+等价于
+```verilog
+(b ##1 c)
+or (a ##1 b ##1 c)
+or (a ##1 a ##1 b ##1 c)
+or (a ##1 a ##1 a ##1 b ##1 c)
+```
+
+为了指定有限但无界的迭代次数，使用美元符号（`$`）。例如，重复
+```verilog
+a ##1 b [*1:$] ##1 c
+```
+
+在三个或更多连续时钟节拍上匹配，如果 a 在第一个时钟节拍上为真，c 在最后一个时钟节拍上为真，并且 b 在第一个和最后一个之间的每个时钟节拍上严格为真。
+
+通过精确计数指定重复的迭代次数等效于指定最小迭代次数等于最大迭代次数的范围。换句话说，`seq[*n]` 等效于 `seq[*n:n]`。
+
+跳转重复（非连续精确重复）采用布尔表达式而不是序列作为操作数。它指定布尔表达式的迭代匹配，这些匹配不一定连续，并在最后一个迭代匹配结束。例如：
+```verilog
+a ##1 b [->2:10] ##1 c
+```
+
+在连续时钟节拍上匹配，如果 a 在第一个时钟节拍上为真，c 在最后一个时钟节拍上为真，b 在倒数第二个时钟节拍上为真，并且包括倒数第二个时钟节拍，有至少 2 个且最多 10 个不一定连续的时钟节拍严格在第一个和最后一个时钟节拍之间，b 在这些时钟节拍上为真。这个序列等效于以下内容：
+```verilog
+a ##1 ((!b[*0:$] ##1 b) [*2:10]) ##1 c
+```
+
+非连续重复类似于跳转重复，但是匹配不必在操作数布尔表达式的最后一个迭代匹配结束。非连续重复操作符允许匹配在操作数布尔表达式的最后一个迭代匹配结束后任意多个时钟节拍上延续，只要布尔表达式在所有额外的时钟节拍上为假。例如：
+```verilog
+a ##1 b [=2:10] ##1 c
+```
+
+在连续时钟节拍上匹配，如果 a 在第一个时钟节拍上为真，c 在最后一个时钟节拍上为真，并且在第一个和最后一个时钟节拍之间至少有 2 个且最多 10 个不一定连续的时钟节拍，b 在这些时钟节拍上为真。这个序列等效于以下内容：
+```verilog
+a ##1 ((!b [*0:$] ##1 b) [*2:10]) ##1 !b[*0:$] ##1 c
+```
+
+连续重复操作符可以应用于一般序列表达式，但是跳转重复和非连续重复操作符只能应用于布尔表达式。特别地，跳转重复和非连续重复不能应用于附加了序列匹配项（见 16.10，16.11）的布尔表达式。例如，以下是合法的序列表达式：
+```verilog
+(b[->1], v = e)[*2]
+```
+
+但以下是非法的：
+```verilog
+(b, v = e)[->2]
+```
+
+### 16.9.3 采样值函数
+本小节描述用于访问表达式的采样值的系统函数。这些函数包括访问当前采样值、访问过去的采样值或检测表达式的采样值的变化的功能。采样表达式的采样在 16.5.1 中解释。不允许在传递给这些函数的参数表达式中使用本地变量（见 16.10）和 matched 序列方法。提供以下函数：
+ - `$sampled(expression)`
+ - `$rose(expression [, [clocking_event] ] )`
+ - `$fell(expression [, [clocking_event] ] )`
+ - `$stable(expression [, [clocking_event] ] )`
+ - `$changed(expression [ , [ clocking_event ] ] )`
+ - `$past(expression1 [, [number_of_ticks ] [, [expression2 ] [, [clocking_event]]] ] )`
+
+这些函数的使用不限于断言功能；它们也可以作为过程代码中的表达式使用。时钟事件，虽然作为 `$past`、`$rose`、`$stable`、`$changed` 和 `$fell` 函数的显式参数是可选的，但是对于它们的语义是必需的。时钟事件用于对参数表达式的值进行采样。
+
+函数 `$sampled` 不使用时钟事件。
+
+对于除 `$sampled` 之外的采样值函数，时钟事件应当作为显式参数指定，或者从调用函数的代码中推断。推断时钟事件的规则如下：
+ - 如果在断言中调用，则使用时钟流规则（见 16.13.3）确定的适当时钟事件。
+ - 否则，如果在断言中的禁用条件或时钟表达式中调用，则应当显式时钟。
+ - 否则，如果在断言的动作块中调用，则使用断言的主时钟。
+ - 否则，如果在过程中调用，则使用过程上下文中推断的时钟（见 16.14.6）。
+ - 否则，如果在断言之外调用，则使用默认时钟（见 14.12）。
+
+函数 `$sampled` 返回其参数（见 16.5.1）的采样值。在并发断言中使用 `$sampled` 是多余的，尽管允许，因为函数的结果与在断言中使用的表达式的采样值相同。在 `disable iff` 子句中使用 `$sampled` 是有意义的，因为默认情况下禁用条件不会被采样（见 16.12）。
+
+函数 `$sampled` 用于访问在并发断言中的动作块中使用的表达式的值。考虑以下示例：
+```verilog
+logic a, b, clk;
+// ...
+a1_bad: assert property (@clk a == b)
+    else $error("Different values: a = %b, b = %b", a, b);
+a2_ok: assert property (@clk a == b)
+    else $error("Different values: a = %b, b = %b",
+        $sampled(a), $sampled(b));
+```
+
+如果在某个时钟节拍中，a 的采样值为 0，b 的采样值为 1，但它们在该时钟节拍的 Reactive 区域中的当前值为 0，则断言 a1_bad 将报告 Different values: a = 0, b = 0。这是因为动作块在 Reactive 区域中评估（见 16.14.1）。断言 a2_ok 报告预期的消息 Different values: a = 0, b = 1，因为在其动作块中的 a 和 b 的值在断言中的上下文中评估。
+
+以下函数称为值变化函数，用于检测表达式的采样值的变化：`$rose`、`$fell`、`$stable` 和 `$changed`。
+
+值变化函数检测表达式的采样值的变化（或在 `$stable` 的情况下，没有变化）。通过将表达式的采样值与最近的严格前一个时钟节拍中发生的时钟事件（采样上一拍的定义和 `$past` 怎样计算过去值的描述参见 16.5.1）的采样值进行比较来确定变化（或缺乏变化）。值变化函数的结果是 true 或 false，并且值变化函数的调用可以用作布尔表达式。值变化函数的结果应当按照以下规则确定：
+ - `$rose` 如果表达式的最低有效位更改为 1，则返回 true。否则，返回 false。
+ - `$fell` 如果表达式的最低有效位更改为 0，则返回 true。否则，返回 false。
+ - `$stable` 如果表达式的值没有更改，则返回 true。否则，返回 false。
+ - `$changed` 如果表达式的值更改，则返回 true。否则，返回 false。
+
+当这些函数在或在第一个时钟事件发生之前的模拟时间步骤时调用时，结果是通过将表达式的采样值与其默认采样值（见 16.5.1）进行比较计算的。
+
+![change](16-3.png)
+
+图 16-3—值变化表达式
+
+图 16-3 说明了值变化的两个示例：
+ - 值变化表达式 e1 定义为 `$rose(req)`。
+ - 值变化表达式 e2 定义为 `$fell(ack)`。
+
+用于采样值函数的时钟节拍是从属性的时钟中派生的，这与模拟时间步骤的时钟不同。假设，到目前为止，这个时钟在别处定义。在时钟节拍 3，e1 发生，因为 req 在时钟节拍 2 的值为低，时钟节拍 3 的值为高。类似地，e2 在时钟节拍 6 发生，因为 ack 在时钟节拍 5 的值被采样为高，时钟节拍 6 的值被采样为低。
+
+以下示例说明了在 SystemVerilog 断言之外使用 `$rose`：
+```verilog
+always @(posedge clk)
+    reg1 <= a & $rose(b);
+```
+
+在此示例中，时钟事件 `@(posedge clk)` 应用于 `$rose`。当 b 的采样值从其在前一个时钟事件的采样值更改为 1 时，`$rose` 为 true。
+
+`$past` 函数用于访问过去采样值。以下三个可选参数提供：
+ - expression2 用作时钟事件的门控表达式。
+ - number_of_ticks 指定过去的时钟节拍数。
+ - clocking_event 指定用于采样 expression1 的时钟事件。
+
+expression1 和 expression2 可以是断言中允许的任何表达式。如果未指定 expression2，则默认为 1'b1。
+
+number_of_ticks 应当是 1 或更大的编译时常量表达式。如果未指定 number_of_ticks，则默认为 1。
+
+`$past` 返回在 `$past` 评估之前的特定时间步骤中 expression1 的采样值（参见 16.5.1 有关过去时钟节拍中采样值的定义）。如果 number_of_ticks 等于 k，并且 ev 是 clocking_event 下的事件表达式，则特定时间步骤是事件 ev iff expression2 的第 k 个严格之前的时间步骤。如果不存在 k 个严格之前的时间步骤，则从 `$past` 函数返回的值是 expression1 的默认采样值（见 16.5.1）。
+
+`$past` 的时钟事件应当通过 clocking_event 参数显式指定，或者从调用 `$past` 的代码中推断。推断时钟事件的规则在之前描述过。
+
+当两个参数之间的中间可选参数不需要时，应当为每个省略的参数放置一个逗号。例如：
+```verilog
+$past(in1, , enable);
+```
+
+这样，指定了逗号以省略 number_of_ticks。对于空 number_of_ticks 参数，使用默认值 1。对于省略的 clocking_event 参数，不需要包含逗号，因为它不在指定的参数范围内。
+
+`$past` 可以在任何 SystemVerilog 表达式中使用。以下是一个示例：
+```verilog
+always @(posedge clk)
+    reg1 <= a & $past(b);
+```
+
+在此示例中，推断的时钟事件 `@(posedge clk)` 应用于 `$past`。`$past` 在当前 (posedge clk) 的发生中评估，并返回在前一个 (posedge clk) 中采样的 b 的值。
+
+函数 `$past` 可能引用自动变量，例如，过程循环变量，如下所示：
+```verilog
+always @(posedge clk)
+    for (int i = 0; i < 4; i ++)
+        if (cond[i])
+            reg1[i] <= $past(b[i]);
+```
+
+根据过去采样值的定义（见 16.5.1），`$past` 在每次循环迭代中返回 b 的第 i 位的过去值。
+
+当指定 expression2 时，expression1 的采样是基于其与 expression2 时钟门控的采样。例如：
+```verilog
+always @(posedge clk)
+    if (enable) q <= d;
+
+always @(posedge clk)
+    assert property (done |=> (out == $past(q, 2,enable)) );
+```
+
+在此示例中，采样 q 用于评估 `$past` 的采样是基于以下时钟表达式：
+```verilog
+posedge clk iff enable
+```
+
+采样值函数的时钟事件参数可能与调用函数的代码中的上下文中的时钟事件不同，由时钟解算（见 16.16）确定。
+
+考虑以下断言：
+```verilog
+bit clk, fclk, req, gnt, en;
+...
+a1: assert property
+    (@(posedge clk) en && $rose(req) |=> gnt);
+
+a2: assert property
+    (@(posedge clk) en && $rose(req, @(posedge fclk)) |=> gnt);
+```
+
+断言 a1 和 a2 读作：“每当 en 为高且 req 上升时，下一个周期 gnt 必须被断言”。在这两个断言中，req 的上升发生当且仅当 req 在当前 clk 的上升沿的采样值为 1'b1，且在一个特定的前一个时钟事件中，req 的采样值与 1'b1 不同。这两个断言在指定前一个点的方式上有所不同。在 a1 中，前一个点是前一个 clk 的上升沿，而在 a2 中，前一个点是前一个 fclk 的上升沿。
+
+另一个例子，
+```verilog
+always_ff @(posedge clk1)
+    reg1 <= $rose(b, @(posedge clk2));
+```
+
+在这里，reg1 在每次发生 posedge clk1 的时间步骤中更新，使用从 $rose 采样值函数返回的值。$rose 比较 b 的 LSB 的采样值从当前时间步骤（发生 posedge clk1 的时间步骤）的 LSB 的采样值与在发生 posedge clk2 的严格前一个时间步骤的 LSB 的采样值。
+
+如果没有在默认时钟的范围内，以下示例是非法的，因为无法推断任何时钟：
+```verilog
+always @(posedge clk) begin
+    ...
+    @(negedge clk2);
+    x = $past(y, 5); // 非法，如果不在默认时钟范围内
+end
+```
+
+这个例子是合法的，因为处于默认时钟范围内。
+
+### 16.9.4 全局时钟的过去和未来采样值函数
+本节描述了用于访问由全局时钟采样的表达式的最近过去和未来值的系统函数。只有在定义了全局时钟时才能使用这些函数（见 14.14）。这些函数包括访问在全局时钟节拍之前或之后的最近采样值的能力。采样值在 16.5.1 中解释。提供以下函数。
+
+全局时钟的过去采样值函数如下：
+ - `$past_gclk(expression)`
+ - `$rose_gclk(expression)`
+ - `$fell_gclk(expression)`
+ - `$stable_gclk(expression)`
+ - `$changed_gclk(expression)`
+
+全局时钟的未来采样值函数如下：
+ - `$future_gclk(expression)`
+ - `$rising_gclk(expression)`
+ - `$falling_gclk(expression)`
+ - `$steady_gclk(expression)`
+ - `$changing_gclk(expression)`
+
+全局时钟的过去采样值函数的行为可以使用采样值函数定义如下（符号 ≡ 在这里表示“按定义等价”）：
+ - `$past_gclk(v) ≡ $past(v,,, @$global_clock)`
+ - `$rose_gclk(v) ≡ $rose(v, @$global_clock)`
+ - `$fell_gclk(v) ≡ $fell(v, @$global_clock)`
+ - `$stable_gclk(v) ≡ $stable(v, @$global_clock)`
+ - `$changed_gclk(v) ≡ $changed(v, @$global_clock)`
+
+全局时钟的未来采样值函数是相似的，只是它们使用表达式的后续值。
+
+`$future_gclk(v)` 是 v 在下一个全局时钟节拍的采样值（见 16.5.1 有关未来时钟节拍中采样值的定义）。
+
+其他函数定义如下：
+ - `$rising_gclk(expression)` 如果表达式的最低有效位在下一个全局时钟节拍上变为 1，则返回 true。否则，返回 false。
+ - `$falling_gclk(expression)` 如果表达式的最低有效位在下一个全局时钟节拍上变为 0，则返回 true。否则，返回 false。
+ - `$steady_gclk(expression)` 如果表达式的采样值在下一个全局时钟节拍上不变，则返回 true。否则，返回 false。
+ - `$changing_gclk(expression)` 是 `$steady_gclk` 的补集，即，`!$steady_gclk(expression)`。
+
+全局时钟的未来采样值函数只能在 property_expr 或 sequence_expr 中调用；这意味着它们不应该在断言动作块中使用。全局时钟的过去采样值函数是采样值函数的特例，因此对采样值函数及其参数的常规限制适用（见 16.9.3）。特别是，全局时钟的过去采样值函数可以在一般过程代码和动作块中使用。额外的限制被强加在全局时钟的未来采样值函数的使用上：它们不应该被嵌套使用，也不应该在包含序列匹配项的断言中使用（见 16.10，16.11）。
+
+以下示例说明了全局时钟的未来采样值函数的非法使用：
+```verilog
+// 非法：全局时钟的未来采样值函数不应该被嵌套使用
+a1: assert property (@clk $future_gclk(a || $rising_gclk(b)));
+sequence s;
+    bit v;
+    (a, v = a) ##1 (b == v)[->1];
+endsequence : s
+
+// 非法：全局时钟的未来采样值函数不应该在包含序列匹配项的断言中使用
+a2: assert property (@clk s |=> $future_gclk(c));
+```
+
+尽管全局时钟的未来采样值函数依赖于其参数的未来值，但是对于包含全局时钟的未来采样值函数的断言的评估尝试的模拟时间步骤的区间被定义为未来采样值是提前知道的。评估尝试的结束被定义为断言时钟的最后一个节拍，并且不会延迟任何额外的时间步骤直到下一个全局时钟节拍。
+
+`disable iff` 和其他异步断言相关控件，如 `$assertcontrol`（见 20.12），的行为是相对于先前定义的评估尝试的区间。例如，如果在评估尝试的最后一个节拍之后的时间步骤严格执行 带有 control_type 5（Kill） 的 `$assertcontrol`，则它不会影响该尝试，即使 `$assertcontrol` 在下一个全局时钟节拍之前执行。
+
+包含全局时钟的未来采样值函数的断言的动作块的执行应当延迟到跟随评估尝试的最后一个节拍的全局时钟节拍。如果评估尝试失败并且默认情况下调用了 `$error`（见 16.14.1），则 `$error` 应当在跟随评估尝试的最后一个节拍的全局时钟节拍上调用。
+
+用于包含全局时钟的未来采样值函数的断言的评估尝试的开始或结束时间步骤的工具特定消息应当与前面定义的评估尝试的模拟时间步骤的区间一致。消息也可以报告写入的时间步骤，这可能是跟随评估尝试的最后一个节拍的全局时钟节拍的时间步骤。
+
+示例 1：
+
+表 16-2 显示了在不同时间点对 sig 的全局时钟未来采样值函数的返回值。
+
+下面的断言说明了信号只能在下降时钟上改变：
+```verilog
+a1: assert property (@$global_clock $changing_gclk(sig) 
+    |-> $falling_gclk(clk))
+    else $error("sig is not stable");
+```
+
+在图 16-4 中，垂直箭头表示全局时钟的节拍。在时间 80，断言 a1 被违反，因为 `$changing_gclk(sig)` 为 true，`$falling_gclk(clk)` 为 false。因为断言包含全局时钟未来采样值函数，所以动作块中的错误任务 `$error("sig is not stable")` 在时间 90 执行。如果作为由 `$error` 打印的工具特定消息的一部分，工具报告这个评估尝试的开始或结束时间步骤，那么报告的时间是 80。
+
+![future](16-4.png)
+
+图 16-4—未来值变化
+
+表 16-2—全局时钟未来采样值函数
+| 时间 | `$sampled(sig)` | `$future_gclk(sig)` | `$rising_gclk(sig)` | `$falling_gclk(sig)` | `$changing_gclk(sig)` | `$steady_gclk(sig)` |
+| --- | --- | --- | --- | --- | --- | --- |
+| 10 | `1'b1` | `1'b0` | `1'b0` | `1'b1` | `1'b1` | `1'b0` |
+| 30 | `1'b0` | `1'b0` | `1'b0` | `1'b0` | `1'b0` | `1'b1` |
+| 40 | `1'b0` | `1'b0` | `1'b0` | `1'b0` | `1'b0` | `1'b1` |
+| 50 | `1'b0` | `1'b1` | `1'b1` | `1'b0` | `1'b1` | `1'b0` |
+| 80 | `1'b1` | `1'b0` | `1'b0` | `1'b1` | `1'b1` | `1'b0` |
+
+示例 2：
+
+下列假设说明了一个信号 sig 在两个下降时钟 clk 之间必须保持稳定。这与示例 1 中的属性不同，因为 sig 在第一个下降时钟 clk 之前尚未发生。在示例 1 中，sig 在这种情况下不允许改变，但在这个示例中，sig 可以自由切换，直到 clk 开始。
+```verilog
+a2: assume property(@$global_clock 
+    $falling_gclk(clk) ##1 (!$falling_gclk(clk)[*1:$]) |-> 
+    $steady_gclk(sig));
+```
+
+示例 3：
+
+假设信号 rst 在时间 82 和 84 之间为高，其他时间为低。然后以下断言：
+```verilog
+a3: assert property (@$global_clock disable iff (rst) $changing_gclk(sig) 
+    |-> $falling_gclk(clk))
+    else $error("sig is not stable");
+```
+
+在时间 80 失败（见图 16-4），因为 rst 在时间 80 时不活动。失败评估尝试的区间从时间 80 开始，到时间 80 结束。尽管在时间 90 之前，rst 是活动的，但是尝试没有被禁用。
+
+示例 4：
+
+在某些情况下，全局时钟未来值函数提供了一个比过去值函数更自然的属性表达式。例如，以下两个断言是等价的：
+```verilog
+// 由于在周期 0 的边缘的边缘情况，a4 需要 ##1
+a4: assert property (##1 $stable_gclk(sig));
+
+// 在 a5 中，在周期 0 没有问题
+a5: assert property ($steady_gclk(sig));
+```
+
+### 16.9.5 AND 操作
+二进制运算符 `and` 用于当期望两个操作数匹配时，但操作数序列的结束时间可以不同的情况（见 16-7）。
+---
+```verilog
+sequence_expr ::= // from A.2.10
+...
+| sequence_expr and sequence_expr
+```
+---
+语法 16-7—And 操作符语法（摘自附录 A）
+
+`and` 的两个操作数是序列。`and` 操作的匹配要求是两个操作数都匹配。操作数序列从相同时间开始。当一个操作数序列匹配时，它等待另一个操作数序列匹配。复合序列的结束时间是最后完成的操作数序列的结束时间。
+
+当 te1 和 te2 是序列时，复合序列
+```verilog
+te1 and te2
+```
+
+匹配，如果 te1 和 te2 匹配。结束时间是 te1 或 te2 的结束时间，以后者为准。
+
+以下示例是一个带有操作符 and 的序列，其中两个操作数是序列：
+```verilog
+(te1 ##2 te2) and (te3 ##2 te4 ##2 te5)
+```
+
+图 16-5 展示的操作显示了在时钟节拍 8 的评估尝试。这里，两个操作数序列是 `(te1 ##2 te2)` 和 `(te3 ##2 te4 ##2 te5)`。第一个操作数序列要求首先 te1 评估为 true，然后两个时钟节拍后 te2 评估为 true。第二个序列要求首先 te3 评估为 true，然后两个时钟节拍后 te4 评估为 true，再两个时钟节拍后 te5 评估为 true。
+
+![and](16-5.png)
+
+图 16-5—AND 两个序列
+
+这个尝试的结果是匹配，因为两个操作数序列都匹配。各个序列的匹配结束时间是时钟节拍 10 和 12。复合序列的结束时间是两个结束时间中较晚的时间；因此，在时钟节拍 12 识别复合序列的匹配。
+
+在下面的例子中，第一个操作数序列有一个连接操作符，范围从 1 到 5：
+```verilog
+(te1 ##[1:5] te2) and (te3 ##2 te4 ##2 te5)
+```
+
+第一个操作数序列要求 te1 评估为 true，并且 te2 在 1、2、3、4 或 5 个时钟节拍后评估为 true。第二个操作数序列与前一个例子相同。为了考虑复合序列的所有可能匹配，可以采取以下步骤：
+ - 为与第一个序列操作数关联的五个可能的线性序列启动五个评估线程。
+ - 第二个操作数序列只有一个关联的线性序列；因此，只有一个评估线程为它启动。
+ - 图 16-6 显示了从时钟节拍 8 开始的评估尝试。第一个操作数序列的所有五个线性序列都匹配，如时间窗口所示；因此，第一个操作数序列有五个匹配，分别在时钟节拍 9、10、11、12 和 13 结束。第二个操作数序列在时钟节拍 12 匹配。
+ - 每个第一个操作数序列的匹配与第二个操作数序列的单个匹配结合，复合序列的匹配的结束时间由匹配的规则确定。
+
+这个计算的结果是复合序列的五个匹配，其中四个在时钟节拍 12 结束，第五个在时钟节拍 13 结束。图 16-6 显示了在时钟节拍 12 和 13 结束的复合序列的匹配。
+
+![add_range](16-6.png)
+
+图 16-6—AND 两个序列，包括时间范围
+
+如果 te1 和 te2 是采样表达式（而不是序列），则序列 `(te1 and te2)` 匹配，如果 te1 和 te2 同时评估为 true。
+
+图 16-7 显示了尝试在每个时钟节拍的结果。序列在时钟节拍 1、3、8 和 14 匹配，因为 te1 和 te2 同时为 true。在所有其他时钟节拍，AND 操作的匹配失败，因为 te1 或 te2 为 false。
+
+![add_boolean](16-7.png)
+
+图 16-7—AND 两个布尔表达式
+
+### 16.9.6 交集（AND 与长度限制）
+二进制运算符 `intersect` 用于当期望两个操作数匹配时，但操作数序列的结束时间必须相同（见 16-8）。
+---
+```verilog
+sequence_expr ::= // from A.2.10
+...
+| sequence_expr intersect sequence_expr
+```
+---
+语法 16-8—交集操作符语法（摘自附录 A）
+
+`intersect` 的两个操作数是序列。`intersect` 操作匹配要求如下：
+ - 两个操作数都匹配。
+ - 两个操作数的匹配长度相同。
+
+`and` 和 `intersect` 的基本区别是序列长度的额外要求。
+
+尝试评估交集序列可能导致多个匹配。这样的尝试的结果可以计算如下：
+ - 匹配的第一个和第二个操作数的长度相同的匹配成对。每个这样的对导致复合序列的匹配，长度和结束点等于操作数序列的匹配的共享长度和结束点。
+ - 如果找不到这样的对，则没有复合序列的匹配。
+
+图 16-8 类似于图 16-6，除了 `and` 被 `intersect` 替换。在这种情况下，与图 16-6 相比，只有一个时钟节拍 12 的匹配。
+
+![intersect](16-8.png)
+
+图 16-8—交集两个序列
+
+### 16.9.7 OR 操作
+运算符 `or` 用于当期望两个操作数序列中至少一个匹配时（见 16-9）。
+---
+```verilog
+sequence_expr ::= // from A.2.10
+...
+| sequence_expr or sequence_expr
+```
+---
+语法 16-9—或操作符语法（摘自附录 A）
+
+`or` 的两个操作数是序列。
+
+如果操作数 te1 和 te2 是表达式，则
+```verilog
+te1 or te2
+```
+
+在任何时钟节拍上匹配，其中至少一个 te1 和 te2 为 true。
+
+图 16-9 说明了一个 OR 操作，其中两个操作数 te1 和 te2 是表达式。复合序列在时钟节拍 7 和 13 不匹配，因为 te1 和 te2 在这些时钟节拍上都为 false。在所有其他时钟节拍上，复合序列匹配，因为 te1 和 te2 至少有一个为 true。
+
+![or](16-9.png)
+
+图 16-9—OR 两个布尔表达式
+
+当 te1 和 te2 是序列时，复合序列
+```verilog
+te1 or te2
+```
+
+匹配，如果至少一个 te1 和 te2 匹配。每个 te1 或 te2 的匹配都是复合序列的匹配。复合序列的结束时间是 te1 或 te2 的结束时间。换句话说，复合序列的匹配是 te1 的匹配的并集和 te2 的匹配的并集的联合。
+
+下面的例子展示了一个带有操作符 or 的序列，其中两个操作数是序列。图 16-10 说明这个例子。
+```verilog
+(te1 ##2 te2) or (te3 ##2 te4 ##2 te5)
+```
+
+![or_seq](16-10.png)
+
+图 16-10—OR 两个序列
+
+在上面的例子中，两个操作数是 `(te1 ##2 te2)` 和 `(te3 ##2 te4 ##2 te5)`。第一个序列要求 te1 首先评估为 true，然后两个时钟节拍后 te2 评估为 true。第二个序列要求 te3 评估为 true，然后两个时钟节拍后 te4 评估为 true，再两个时钟节拍后 te5 评估为 true。图 16-10 显示了在时钟节拍 8 的评估尝试。第一个序列在时钟节拍 10 匹配，第二个序列在时钟节拍 12 匹配。因此，复合序列在时钟节拍 10 和 12 匹配。
+
+在下面的例子中，第一个操作数序列有一个连接操作符，范围从 1 到 5：
+```verilog
+(te1 ##[1:5] te2) or (te3 ##2 te4 ##2 te5)
+```
+
+第一个操作数序列要求 te1 评估为 true，并且 te2 在 1、2、3、4 或 5 个时钟节拍后评估为 true。第二个操作序列要求 te3 评估为 true，两拍后 te4 评估为 true，再两拍后 te5 评估为 true。复合序列在任何时钟节拍上匹配，其中至少一个操作数序列匹配。如图 16-11 所示，对于时钟节拍 8 的尝试，第一个操作数序列在时钟节拍 9、10、11、12 和 13 匹配，第二个操作数序列在时钟节拍 12 匹配。因此，复合序列在时钟节拍 9、10、11 和 13 上有一个匹配，在时钟节拍 12 上有两个匹配。
+
+![or_range](16-11.png)
+
+图 16-11—OR 两个序列，包括时间范围
+
+### 16.9.8 first_match 操作
+`first_match` 操作符仅匹配其操作数序列的评估尝试中的第一个可能的匹配。这允许所有后续匹配被丢弃。特别是，当一个序列是另一个序列的子序列时，应用 `first_match` 操作符对包含序列的评估有重要影响（见 16-10）。
+---
+```verilog
+sequence_expr ::= // from A.2.10
+...
+| first_match ( sequence_expr {, sequence_match_item} )
+```
+---
+语法 16-10—first_match 操作符语法（摘自附录 A）
+
+`first_match` 的评估尝试的操作数 seq 的匹配开始于相同的时钟节拍。如果 seq 的评估尝试没有匹配，则 `first_match` 的评估尝试也没有匹配。否则，seq 的最早结束时钟节拍的匹配是 `first_match` 的匹配。如果有多个 seq 的匹配在最早结束时钟节拍上，那么所有这些匹配都是 `first_match` 的匹配。
+
+以下示例显示了一个变量延迟规范：
+```verilog
+sequence t1;
+    te1 ## [2:5] te2;
+endsequence
+
+sequence ts1;
+    first_match(te1 ## [2:5] te2);
+endsequence
+```
+
+在这里，te1 和 te2 是表达式。序列 t1 的每次尝试最多可以匹配以下四个序列：
+```verilog
+te1 ##2 te2
+te1 ##3 te2
+te1 ##4 te2
+te1 ##5 te2
+```
+
+然而，序列 ts1 只能匹配前面四个序列中的一个。在前面四个序列中，最早结束的匹配是 ts1 的匹配。
+
+例如：
+```verilog
+sequence t2;
+    (a ##[2:3] b) or (c ##[1:2] d);
+endsequence
+
+sequence ts2;
+    first_match(t2);
+endsequence
+```
+
+序列 t2 的每次尝试最多可以匹配以下四个序列：
+```verilog
+a ##2 b
+a ##3 b
+c ##1 d
+c ##2 d
+```
+
+序列 ts2 只匹配这些序列中最早结束的匹配。如果 a、b、c 和 d 是表达式，则可能同时结束的匹配是：
+```verilog
+a ##2 b
+c ##2 d
+```
+
+如果这两个序列匹配，并且 `(c ##1 d)` 不匹配，则 ts2 的评估结果是这两个匹配。
+
+序列匹配项可以附加到 `first_match` 操作符的操作数序列。序列匹配项放置在与操作数相同的括号中。因此，例如，局部变量赋值 `x = e` 可以通过
+```verilog
+first_match(seq, x = e)
+```
+
+等效于以下内容：
+```verilog
+first_match((seq, x = e))
+```
+
+有关序列匹配项的讨论，请参见 16.10 和 16.11。
+
+### 16.9.9 在序列上的条件
+序列通常在一些正确行为的条件假设下发生。例如，处理事务时必须满足逻辑条件。另外，处理事务时禁止出现某些值。这种情况可以直接使用 16-11 中显示的构造。
+---
+```verilog
+sequence_expr ::= // from A.2.10
+...
+| expression_or_dist throughout sequence_expr
+```
+---
+语法 16-11—Throughout 构造语法（摘自附录 A）
+
+构造 exp `throughout` seq 是以下内容的缩写：
+```verilog
+(exp) [*0:$] intersect seq
+```
+
+复合序列 exp `throughout` seq 在一系列连续时钟节拍的有限间隔内匹配，前提是 seq 在该间隔内匹配，并且 exp 在该间隔内的每个时钟节拍上评估为 true。
+
+下面的示例在图 16-12 中说明。
+```verilog
+sequence burst_rule1;
+    @(posedge mclk)
+    $fell(burst_mode) ##0 
+    ((!burst_mode) throughout (##2 ((trdy==0)&&(irdy==0)) [*7]));
+endsequence
+```
+
+![16-12](16-12.png)
+
+图 16-12—Throughout 限制失败的匹配
+
+图 16-13 说明了从时钟节拍 2 开始的序列 burst_rule1 的评估尝试。因为信号 burst_mode 在时钟节拍 1 为高，在时钟节拍 2 为低，所以 `$fell(burst_mode)` 在时钟节拍 2 为 true。为了完成 burst_rule1 的匹配，需要 burst_mode 的值在从时钟节拍 2 开始的子序列 `(##2 ((trdy==0)&&(irdy==0)) [*7])` 的匹配期间保持低。这个子序列从时钟节拍 2 到时钟节拍 10 匹配。然而，在时钟节拍 9，burst_mode 变为高，因此不符合 `throughout` 的规则。
+
+如果信号 burst_mode 在至少时钟节拍 10 保持低，则从时钟节拍 2 到时钟节拍 10 有一个 burst_rule1 的匹配，如图 16-13 所示。
+
+![16-13](16-13.png)
+
+图 16-13—Throughout 限制成功的匹配
+
+### 16.9.10 包含在另一个序列中的序列
+序列包含在另一个序列中的情况可以通过 16-12 中显示的构造来表示。
+---
+```verilog
+sequence_expr ::= // from A.2.10
+...
+| sequence_expr within sequence_expr
+```
+---
+语法 16-12—Within 构造语法（摘自附录 A）
+
+构造 seq1 `within` seq2 是以下内容的缩写：
+```verilog
+(1[*0:$] ##1 seq1 ##1 1[*0:$]) intersect seq2
+```
+
+复合序列 seq1 `within` seq2 在一系列连续时钟节拍的有限间隔内匹配，前提是 seq2 在该间隔内匹配，并且 seq1 在该间隔内的某个子间隔内匹配。换句话说，seq1 和 seq2 的匹配必须满足以下条件：
+ - seq1 的匹配的开始点不早于 seq2 的匹配的开始点。
+ - seq1 的匹配的结束点不晚于 seq2 的匹配的结束点。
+
+例如，序列
+```verilog
+!trdy[*7] within ($fell(irdy) ##1 !irdy[*8])
+```
+
+在图 16-13 中显示的跟踪上匹配，从时钟节拍 3 到时钟节拍 11。
+
+### 16.9.11 从更简单的子序列组合序列
+有两种方法可以使用更简单的子序列组合复杂序列。
+
+一种是通过引用其名称实例化命名序列。这种引用的求值要求命名序列从封闭序列求值期间到达引用的时钟节拍开始匹配。例如：
+```verilog
+sequence s;
+    a ##1 b ##1 c;
+endsequence
+
+sequence rule;
+    @(posedge sysclk)
+        trans ##1 start_trans ##1 s ##1 end_trans;
+endsequence
+```
+
+序列 s 在序列 rule 的 start_trans 求值后的一个时钟节拍被计算。
+
+另一种使用序列的方法是在另一个序列中检测其结束点。序列的结束点在匹配序列的结束时钟节拍到达时到达，无论匹配的开始时钟节拍如何。到达结束点可以通过使用方法 `triggered` 来测试。
+
+要检测结束点，可以将 `triggered` 方法应用于命名序列实例，带或不带参数，未命名的形式参数，或类型为 `sequence` 的形式参数，如果允许的话，如下所示：
+```verilog
+sequence_instance.triggered
+```
+
+或
+```verilog
+formal_argument_sequence.triggered
+```
+
+`triggered` 是序列上的方法。其操作的结果是 true（1'b1）或 false（1'b0）。当 `triggered` 方法在表达式中求值时，它测试其操作数序列在特定时间点是否到达其结束点。`triggered` 的结果不取决于其操作数序列的匹配的开始点。下面展示一个示例：
+```verilog
+sequence e1;
+    @(posedge sysclk) $rose(ready) ##1 proc1 ##1 proc2 ;
+endsequence
+
+sequence rule;
+    @(posedge sysclk) reset ##1 inst ##1 e1.triggered ##1 branch_back;
+endsequence
+```
+
+在这个示例中，序列 e1 必须在 inst 之后的一个时钟节拍开始匹配。如果 `triggered` 方法被替换为序列 e1 的实例，e1 必须在 inst 之后的一个时钟节拍开始匹配。注意，`triggered` 方法只测试 e1 的结束点，并且与 e1 的开始点无关。
+
+下面的示例展示了在带有参数的命名序列实例上应用 `triggered` 方法的应用：
+```verilog
+sequence e2(a,b,c);
+    @(posedge sysclk) $rose(a) ##1 b ##1 c;
+endsequence
+
+sequence rule2;
+    @(posedge sysclk) reset ##1 inst ##1 e2(ready,proc1,proc2).triggered 
+    ##1 branch_back;
+endsequence
+```
+
+rule2 等价于 rule2a，如下所示：
+```verilog
+sequence e2_instantiated;
+    e2(ready,proc1,proc2);
+endsequence
+
+sequence rule2a;
+    @(posedge sysclk) reset ##1 inst ##1 e2_instantiated.triggered ##1 
+    branch_back;
+endsequence
+```
+
+下面的示例展示了在类型为 `sequence` 的形式参数上应用 `triggered` 方法的应用：
+```verilog
+sequence e3(sequence a, untyped b); 
+    @(posedge sysclk) a.triggered ##1 b;
+endsequence
+
+sequence rule3; 
+    @(posedge sysclk) reset ##1 e3(ready ##1 proc1, proc2) ##1 branch_back;
+endsequence
+```
+
+对于将本地变量传递到应用了 `triggered` 的序列实例的情况有额外的限制（见 16.10）。
+
+`triggered` 方法可以在多个时钟的情况下使用。然而，应用 `triggered` 的序列实例的结束时钟始终与出现 `triggered` 方法的上下文中的时钟相同（见 16.13.5）。
+
+## 16.10 局部变量
+数据可以在命名序列（见 16.8）和属性（见 16.12）中使用动态创建的本地变量进行操作。使用静态 SystemVerilog 变量意味着只存在一个副本。如果需要在流水线设计中检查数据值，那么对于进入管道的每个数据量，可以使用一个单独的变量来存储管道的预测输出，以便在结果实际退出管道时进行比较。可以通过使用数组变量来构建这种存储，这些变量按移位寄存器的方式排列，以模拟数据通过管道传播。然而，在更复杂的情况下，管道的延迟是变量，且无序，这种构造可能变得非常复杂且容易出错。因此，变量被需要是局部的，在特定事务检查中使用，并且可以跨越任意时间间隔并且可以与其他事务检查重叠。因此，当需要时，将在命名序列的实例内动态创建一个局部变量，并在到达序列的末尾时删除它。
+
+动态创建局部变量及其赋值通过使用局部变量形式参数声明（见 16.8.2，16.12.18）或在命名序列或属性声明中使用断言变量声明（见 16.12）来实现。没有进一步的规定，术语 *局部变量* 将意味着局部变量形式参数或在 assertion_variable_declaration 中声明的局部变量。没有进一步的规定，术语 *局部变量初始化赋值* 将意味着将方向为 `input` 或 `inout` 的局部变量形式参数的初始值赋为相应实际参数的值，或在 assertion_variable_declaration 中声明的局部变量的声明赋值（见 语法 16-13）。
+---
+```verilog
+assertion_variable_declaration ::= // from A.2.10
+var_data_type list_of_variable_decl_assignments ;
+```
+---
+语法 16-13—断言变量声明语法（摘自附录 A）
+
+断言变量声明的数据类型必须显式指定。数据类型必须是断言中允许的类型之一（见 16.6）。数据类型后面必须是一个或多个逗号分隔的标识符，可选地带有声明赋值。如果存在声明赋值，则定义了要放入相应局部变量的初始值。初始值由一个表达式定义，该表达式不必是常量。
+
+局部变量的采样值定义为当前值（见 16.5.1）。
+
+在对命名序列或属性的实例的每次评估尝试开始时，将创建每个局部变量的新副本，并且如果存在，则将执行相应的初始化赋值。初始化赋值将按照序列或属性声明中的顺序在 Observed 区域中执行。对于此规则，所有局部变量形式参数的初始化赋值将在任何 assertion_variable_declaration 中声明的局部变量的初始化赋值之前执行。局部变量的初始化赋值使用在评估尝试开始时的时间槽中对其表达式的采样值。给定局部变量的初始化赋值的表达式可能引用先前声明的局部变量。在这种情况下，先前声明的局部变量本身必须有初始化赋值，并且将使用先前声明的局部变量的初始值在给定局部变量的表达式的评估中使用。局部变量没有默认初始值。没有初始化赋值的局部变量在评估尝试开始时未分配。
+
+例如，在实例的评估尝试开始时
+```verilog
+sequence s;
+    logic u, v = a, w = v || b;
+    ...
+endsequence
+```
+
+首先执行 a 到 v 的赋值，然后执行 `v || b` 到 w 的赋值。赋给 w 的值与声明赋值 w = a || b 的结果相同。局部变量 u 在评估尝试开始时未分配。
+
+局部变量可以在声明它们的命名序列或属性的主体中分配和重新分配。
+---
+```verilog
+sequence_expr ::= // from A.2.10
+... 
+| ( sequence_expr {, sequence_match_item} ) [ sequence_abbrev ] 
+... 
+sequence_match_item ::= 
+operator_assignment 
+| inc_or_dec_expression 
+... 
+```
+---
+语法 16-14—变量赋值语法（摘自附录 A）
+
+可以在语法子序列的末尾添加一个或多个局部变量，方法是将子序列放在括号中，子序列与局部变量的赋值列表之间用逗号分隔。在子序列的任何非空匹配结束时，局部变量赋值将按照它们在列表中出现的顺序执行。例如，在
+```verilog
+a ##1 b[->1] ##1 c[*2]
+```
+
+如果希望在 `b[->1]` 的匹配中赋值 `x = e`，然后 `y = x && f`，可以将序列重写为
+```verilog
+a ##1 (b[->1], x = e, y = x && f) ##1 c[*2]
+```
+
+局部变量可以在序列或属性中的任何地方重新赋值。例如
+```verilog
+a ##1 (b[->1], x = e, y = x && f) ##1 (c[*2], x &= g)
+```
+
+局部变量赋值附加的子序列不允许空匹配。例如，序列
+```verilog
+a ##1 (b[*0:1], x = e) ##1 c[*2] // 非法
+```
+
+是非法的，因为子序列 `b[*0:1]` 可以匹配空字。序列
+```verilog
+(a ##1 b[*0:1], x = e) ##1 c[*2] // 合法
+```
+
+是合法的，因为连接的子序列 `a ##1 b[*0:1]` 不能匹配空字。
+
+局部变量可以在声明它们的序列或属性中引用。在引用被引用之前，序列或属性必须在该点之前为局部变量赋值。先前的赋值可以是初始化赋值或附加到子序列的赋值。存在使用增量或减量运算符或除“`=`”之外的赋值运算符的引用关联的隐式引用。因此，局部变量必须在使用增量或减量运算符或除“`=`”之外的赋值运算符之前被赋值。
+
+在某些情况下，赋值的局部变量稍后变得未赋值。如果局部变量不流出子序列（见下文），则局部变量在该子序列的末尾变得未分配，无论它是否在该点之前被赋值。在局部变量再次被赋值之前，局部变量不得在该点之后引用。请参见 F.5.4，以了解定义局部变量流的精确条件。
+
+局部变量不得被层次引用。
+
+局部变量的使用示例是，假设管道具有固定的五个时钟周期的延迟。数据在 pipe_in 上进入管道，当 valid_in 为 true 时，管道计算的值在五个时钟周期后出现在信号 pipe_out1 上。管道转换的数据由一个函数预测，该函数递增数据。以下属性验证了这种行为：
+```verilog
+property e;
+    int x;
+    (valid_in, x = pipe_in) |-> ##5 (pipe_out1 == (x+1));
+endproperty
+```
+
+属性 e 的评估如下：
+ - 当 valid_in 为 true 时，x 被赋值为 pipe_in 的值。如果五个周期后，pipe_out1 等于 x+1，则属性 e 为 true。否则，属性 e 为 false。
+ - 当 valid_in 为 false 时，属性 e 评估为 true。
+
+局部变量可以像使用相同类型的静态变量一样用于形成表达式。这包括在向量的位选择和部分选择或数组的索引中使用局部变量。局部变量不得在时钟事件表达式中使用。
+
+局部变量可以在序列或属性中使用。
+```verilog
+sequence data_check;
+    int x;
+    a ##1 (!a, x = data_in) ##1 !b[*0:$] ##1 b && (data_out == x);
+endsequence
+
+property data_check_p
+    int x;
+    a ##1 (!a, x = data_in) |=> !b[*0:$] ##1 b && (data_out == x);
+endproperty
+```
+
+局部变量赋值可以附加到重复的操作数序列，并完成值的累积。
+```verilog
+sequence rep_v;
+    int x = 0;
+    (a[->1], x += data)[*4] ##1 b ##1 c && (data_out == x);
+endsequence
+```
+
+累积局部变量可以用于计算条件重复的次数，如下面的示例所示：
+```verilog
+sequence count_a_cycles;
+    int x;
+    ($rose(a), x = 1)
+    ##1 (a, x++)[*0:$]
+    ##1 !a && (x <= MAX);
+endsequence
+```
+
+在命名序列或属性中声明的局部变量在实例化上下文中不可见。下面的示例说明了在序列 seq1 中的序列 sub_seq1 的局部变量 v1 的非法访问。
+```verilog
+sequence sub_seq1;
+    int v1;
+    (a ##1 !a, v1 = data_in) ##1 !b[*0:$] ##1 b && (data_out == v1);
+endsequence
+
+sequence seq1;
+    c ##1 sub_seq1 ##1 (do1 == v1); // 错误，因为 v1 不可见
+endsequence
 ```
 
 
 
-
-
-
-
+It can be useful to assign a value to a local variable within an instance of a named sequence and reference the
+local variable in the instantiating context at or after the completion of a match of the instance. This
+capability is supported under the following conditions: 
+— The local variable shall be declared outside the named sequence, and its scope shall include both the
+instance of the named sequence and the desired reference in the instantiating context.
+— The local variable shall be passed as an entire actual argument in the list of arguments of the
+instance of the named sequence.
+— The corresponding formal argument shall be untyped.
+The named sequence may specify assignments to the formal argument in one or more
+sequence_match_items. 
+The following example illustrates this usage: 
+sequence sub_seq2(lv);
+(a ##1 !a, lv = data_in) ##1 !b[*0:$] ##1 b && (data_out == lv);
+endsequence
+sequence seq2;
+int v1;
+c ##1 sub_seq2(v1) // v1 is bound to lv
+##1 (do1 == v1); // v1 holds the value that was assigned to lv
+endsequence
+An alternative way to achieve a similar capability is by using local variable formal arguments (see 16.8.2). 
+Local variables can be passed into an instance of a named sequence to which triggered is applied and
+accessed in a similar manner. For example:
+sequence seq2a; 
+int v1; c ##1 sub_seq2(v1).triggered ##1 (do1 == v1); 
+// v1 is now bound to lv
+endsequence
+There are additional restrictions when passing local variables into an instance of a named sequence to which
+triggered is applied: 
+— Local variables can be passed in only as entire actual arguments, not as proper subexpressions of
+actual arguments.
+— In the declaration of the named sequence, the formal argument to which the local variable is bound
+shall not be referenced before it is assigned.
+The second restriction is met by sub_seq2 because the assignment lv = data_in occurs before the
+reference to lv in data_out == lv.
+If a local variable is assigned before being passed into an instance of a named sequence to which
+triggered is applied, then the restrictions prevent this assigned value from being visible within the named
+sequence. The restrictions are important because the use of triggered means that there is no guaranteed
+relationship between the point in time at which the local variable is assigned outside the named sequence
+and the beginning of the match of the instance.
+A local variable that is passed in as actual argument to an instance of a named sequence to which
+triggered is applied will flow out of the application of triggered to that instance provided both of the
+following conditions are met:
+— The local variable flows out of the end of the named sequence instance, as defined by the local
+variable flow rules for sequences. (See the following and F.5.4.)
+— The application of triggered to this instance is a maximal Boolean expression. In other words, the
+application of triggered cannot have negation or any other expression operator applied to it.
+Both conditions are satisfied by sub_seq2 and seq2a. Thus, in seq2a, the value in v1 in the comparison
+do1 == v1 is the value assigned to lv in sub_seq2 by the assignment lv = data_in. However, in 
+sequence seq2b; 
+ int v1; c ##1 !sub_seq2(v1).triggered ##1 (do1 == v1); // v1 unassigned 
+endsequence
+the second condition is violated because of the negation applied to sub_seq2(v1).triggered. Therefore,
+v1 does not flow out of the application of triggered to this instance, and the reference to v1 in do1 ==
+v1 is to an unassigned variable.
+In a single cycle, there can be multiple matches of a sequence instance to which triggered is applied, and
+these matches can have different valuations of the local variables. The multiple matches are treated
+semantically the same way as matching both disjuncts of an or (see the following). In other words, the
+thread evaluating the instance to which triggered is applied will fork to account for such distinct local
+variable valuations.
+When a local variable is a formal argument of a sequence declaration, it is illegal to declare the variable, as
+shown in the following example: 
+sequence sub_seq3(lv);
+int lv; // illegal because lv is a formal argument
+(a ##1 !a, lv = data_in) ##1 !b[*0:$] ##1 b && (data_out == lv);
+endsequence
+There are special considerations when using local variables in sequences involving the branching operators
+or, and, and intersect. The evaluation of a composite sequence constructed from one of these operators
+can be thought of as forking two threads to evaluate the operand sequences in parallel. A local variable may
+have been assigned a value before the start of the evaluation of the composite sequence, either from an
+initialization assignment or from an assignment attached to a preceding subsequence. Such a local variable
+is said to flow in to each of the operand sequences. The local variable may be assigned or reassigned in one
+or both of the operand sequences. In general, there is no guarantee that evaluation of the two threads results
+in consistent values for the local variable, or even that there is a consistent view of whether the local variable
+has been assigned a value. Therefore, the values assigned to the local variable before and during the
+evaluation of the composite sequence are not always allowed to be visible after the evaluation of the
+composite sequence.
+In some cases, inconsistency in the view of the local variable’s value does not matter, while in others it does.
+Precise conditions are given in F.5.4 to define static (i.e., compile-time computable) conditions under which
+a sufficiently consistent view of the local variable’s value after the evaluation of the composite sequence is
+provided. If these conditions are satisfied, then the local variable is said to flow out of the composite
+sequence. Otherwise, the local variable shall become unassigned at the end of the composite sequence. An
+intuitive description of the conditions for local variable flow follows:
+a) Variables assigned on parallel threads cannot be accessed in sibling threads. For example:
+sequence s4;
+int x;
+ (a ##1 (b, x = data) ##1 c) or (d ##1 (e==x)); // illegal
+endsequence
+b) In the case of or, a local variable flows out of the composite sequence if, and only if, it flows out of
+each of the operand sequences. If the local variable is not assigned before the start of the composite
+sequence and it is assigned in only one of the operand sequences, then it does not flow out of the
+composite sequence. 
+c) Each thread for an operand of an or that matches its operand sequence continues as a separate
+thread, carrying with it its own latest assignments to the local variables that flow out of the
+composite sequence. These threads do not have to have consistent valuations for the local variables.
+For example:
+sequence s5;
+int x,y;
+((a ##1 (b, x = data, y = data1) ##1 c)
+or (d ##1 (`true, x = data) ##0 (e==x))) ##1 (y==data2);
+// illegal because y is not in the intersection
+endsequence
+sequence s6;
+int x,y;
+((a ##1 (b, x = data, y = data1) ##1 c)
+or (d ##1 (`true, x = data) ##0 (e==x))) ##1 (x==data2);
+// legal because x is in the intersection
+endsequence
+d) In the case of and and intersect, a local variable that flows out of at least one operand shall flow
+out of the composite sequence unless it is blocked. A local variable is blocked from flowing out of
+the composite sequence if either of the following statements applies: 
+1) The local variable is assigned in and flows out of each operand of the composite sequence, or
+2) The local variable is blocked from flowing out of at least one of the operand sequences.
+The value of a local variable that flows out of the composite sequence is the latest assigned value.
+The threads for the two operands are merged into one at completion of evaluation of the composite
+sequence. 
+sequence s7;
+int x,y;
+((a ##1 (b, x = data, y = data1) ##1 c)
+and (d ##1 (`true, x = data) ##0 (e==x))) ##1 (x==data2);
+// illegal because x is common to both threads
+endsequence
+sequence s8;
+int x,y;
+(a ##1 (b, x = data, y = data1) ##1 c)
+and (d ##1 (`true, x = data) ##0 (e==x))) ##1 (y==data2);
+// legal because y is in the difference
+endsequence
