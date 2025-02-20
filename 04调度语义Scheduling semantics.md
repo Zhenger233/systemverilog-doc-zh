@@ -147,7 +147,7 @@ Postponed 区域提供了一个 PLI 回调控制点，允许 PLI 应用程序在
 
 SystemVerilog 的时隙和事件区域流程如图 4-1 所示。
 
-![event_scheduling_regions](event_scheduling_regions.png "4-1 event_scheduling_regions")
+![event_scheduling_regions](4-1.png)
 
 图 4-1 — Event scheduling regions
 ## 4.5 SystemVerilog 仿真参考算法

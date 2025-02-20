@@ -187,7 +187,7 @@ assign circ = 2.0 * PI * R; // 对变量的连续赋值
 
 例如，图 6-1 显示了包括 `medium`大小的 `trireg` 网、其驱动器和仿真结果的原理图。
 
-![alt text](trireg.png)
+![trireg](6-1.png)
 图 6-1——trireg 和它的驱动的仿真值
 
  - a) 在仿真时间 0，线网 a 和线网 b 的值为 1。具有 `strong` 强度的值 1 从与门通过连接到线网 c 的 nmos 开关传播到 `trireg` 网 d。
@@ -197,7 +197,7 @@ assign circ = 2.0 * PI * R; // 对变量的连续赋值
 电容网络是两个或多个 `trireg` 网之间的连接。在电容网络中，处于电容状态的 `trireg` 网之间可以传播逻辑和强度值。
 
 例如，图 6-2 显示了一个电容网络，其中 `trireg` 网处于电容状态，其逻辑值更改了其他 `trireg` 网的逻辑值。
-![alt text](capacitive_network.png)
+![capacitive_network](6-2.png)
 图 6-2——电容网络的仿真结果
 
 在图 6-2 中，`trireg_la` 网的电容强度为 `large`，`trireg_me1` 和 `trireg_me2` 网的电容强度为 `medium`，`trireg_sm` 网的电容强度为 `small`。仿真报告以下事件序列：
@@ -212,7 +212,7 @@ assign circ = 2.0 * PI * R; // 对变量的连续赋值
 线网 b 的值更改还将 `trireg_me1` 连接到 `trireg_me2`；这些 `trireg` 网的大小相同，存储了不同的值。连接导致 `trireg_me1` 和 `trireg_me2` 都更改为 x。
 
 在电容网络中，电荷强度从较大的 `trireg` 网传播到较小的 `trireg` 网。图 6-3 显示了一个电容网络及其仿真结果。
-![alt text](charge_share.png)
+![charge_share](6-3.png)
 图 6-3——电荷共享的仿真结果
 
 在图 6-3 中，`trireg_la` 的电容强度是大，`trireg_sm` 的电容强度是小。仿真报告以下结果：

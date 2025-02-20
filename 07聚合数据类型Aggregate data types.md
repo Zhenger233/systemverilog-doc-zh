@@ -222,11 +222,11 @@ Instr 类型的值是一个 Add 指令，其中包含三个 5 位寄存器字段
 该表示方案递归地应用于任何嵌套的标记联合体。
 
 例如，如果 VInt 类型定义具有 `packed` 限定符，则 Invalid 和 Valid 值的布局如图 7-1 所示。
-![Alt text](Vint.png)
+![Vint](7-1.png)
 图 7-1 带限定符的 vint 类型
 
 例如，如果 Instr 类型有打包的限定符，它的值将具有如图 7-2 所示的布局。
-![Alt text](Instr.png)
+![Instr](7-2.png)
 图 7-2 带限定符的 Instr 类型
 
 ## 7.4 打包和未打包数组

@@ -825,7 +825,7 @@ a <= repeat(5) @(posedge clk) data;
 ```
 
 图 9-1 说明了由此重复事件控制产生的活动。
-![Alt text](repeat.png)
+![repeat](9-1.png)
 图 9-1—利用时钟边沿的重复事件控制的赋值内部延迟
 
 在这个示例中，当遇到赋值时，data 的值被计算。在五次 posedge clk 之后，a 被赋值为 data。
