@@ -1935,132 +1935,303 @@ sequence seq1;
 endsequence
 ```
 
+给命名序列实例的局部变量赋值，并且在实例匹配完成时或之后的实例上下文中引用局部变量是有用的。这种能力在以下条件下得到支持：
+ - 局部变量应在命名序列外部声明，并且其作用域应包括命名序列的实例和实例化上下文中的所需引用。
+ - 局部变量应作为命名序列的实例的参数列表中的整个实际参数传递。
+ - 相应的形式参数应是无类型的。
 
+命名序列可以在一个或多个 sequence_match_items 中指定对形式参数的赋值。
 
-It can be useful to assign a value to a local variable within an instance of a named sequence and reference the
-local variable in the instantiating context at or after the completion of a match of the instance. This
-capability is supported under the following conditions: 
-— The local variable shall be declared outside the named sequence, and its scope shall include both the
-instance of the named sequence and the desired reference in the instantiating context.
-— The local variable shall be passed as an entire actual argument in the list of arguments of the
-instance of the named sequence.
-— The corresponding formal argument shall be untyped.
-The named sequence may specify assignments to the formal argument in one or more
-sequence_match_items. 
-The following example illustrates this usage: 
+以下示例说明了这种用法：
+```verilog
 sequence sub_seq2(lv);
-(a ##1 !a, lv = data_in) ##1 !b[*0:$] ##1 b && (data_out == lv);
+    (a ##1 !a, lv = data_in) ##1 !b[*0:$] ##1 b && (data_out == lv);
 endsequence
+
 sequence seq2;
-int v1;
-c ##1 sub_seq2(v1) // v1 is bound to lv
-##1 (do1 == v1); // v1 holds the value that was assigned to lv
+    int v1;
+    c ##1 sub_seq2(v1) // v1 绑定到 lv
+    ##1 (do1 == v1); // v1 包含被分配给 lv 的值
 endsequence
-An alternative way to achieve a similar capability is by using local variable formal arguments (see 16.8.2). 
-Local variables can be passed into an instance of a named sequence to which triggered is applied and
-accessed in a similar manner. For example:
-sequence seq2a; 
-int v1; c ##1 sub_seq2(v1).triggered ##1 (do1 == v1); 
-// v1 is now bound to lv
+```
+
+通过使用局部变量形式参数（见 16.8.2），可以实现类似的功能。
+
+局部变量可以作为整个实际参数传递到应用了 `triggered` 的命名序列实例，并以类似的方式访问。例如：
+```verilog
+sequence seq2a;
+    int v1;
+    c ##1 sub_seq2(v1).triggered ##1 (do1 == v1); // v1 现在绑定到 lv
 endsequence
-There are additional restrictions when passing local variables into an instance of a named sequence to which
-triggered is applied: 
-— Local variables can be passed in only as entire actual arguments, not as proper subexpressions of
-actual arguments.
-— In the declaration of the named sequence, the formal argument to which the local variable is bound
-shall not be referenced before it is assigned.
-The second restriction is met by sub_seq2 because the assignment lv = data_in occurs before the
-reference to lv in data_out == lv.
-If a local variable is assigned before being passed into an instance of a named sequence to which
-triggered is applied, then the restrictions prevent this assigned value from being visible within the named
-sequence. The restrictions are important because the use of triggered means that there is no guaranteed
-relationship between the point in time at which the local variable is assigned outside the named sequence
-and the beginning of the match of the instance.
-A local variable that is passed in as actual argument to an instance of a named sequence to which
-triggered is applied will flow out of the application of triggered to that instance provided both of the
-following conditions are met:
-— The local variable flows out of the end of the named sequence instance, as defined by the local
-variable flow rules for sequences. (See the following and F.5.4.)
-— The application of triggered to this instance is a maximal Boolean expression. In other words, the
-application of triggered cannot have negation or any other expression operator applied to it.
-Both conditions are satisfied by sub_seq2 and seq2a. Thus, in seq2a, the value in v1 in the comparison
-do1 == v1 is the value assigned to lv in sub_seq2 by the assignment lv = data_in. However, in 
-sequence seq2b; 
- int v1; c ##1 !sub_seq2(v1).triggered ##1 (do1 == v1); // v1 unassigned 
+```
+
+当将局部变量作为实际参数传递到应用了 `triggered` 的命名序列实例时，有额外的限制：
+ - 局部变量只能作为整个实际参数传递，不能作为实际参数的适当子表达式。
+ - 在命名序列的声明中，局部变量绑定到的形式参数在分配之前不得引用。
+
+第二个限制由 sub_seq2 满足，因为赋值 lv = data_in 在引用 lv 的 data_out == lv 之前发生。
+
+如果局部变量在传递到应用了 `triggered` 的命名序列实例之前被赋值，则限制将阻止此分配值在命名序列内部可见。这些限制很重要，因为使用 `triggered` 意味着命名序列外部赋值的时间点与实例的匹配开始之间没有保证的关系。
+
+局部变量作为应用 triggered 的命名序列实例的形式参数传递时，将流出应用 `triggered` 的实例，前提是满足以下两个条件：
+ - 局部变量从命名序列实例的末尾流出，如序列的局部变量流规则所定义的那样（见下文和 F.5.4）。
+ - 对此实例应用 `triggered` 的应用是最大布尔表达式。换句话说，对此实例应用 `triggered` 不能有否定或任何其他表达式运算符。
+
+sub_seq2 和 seq2a 都满足这两个条件。因此，在 seq2a 中，比较 do1 == v1 中的 v1 的值是通过赋值 lv = data_in 给 sub_seq2 中的 lv 而得到的。然而，在
+```verilog
+sequence seq2b;
+    int v1;
+    c ##1 !sub_seq2(v1).triggered ##1 (do1 == v1); // v1 未分配
 endsequence
-the second condition is violated because of the negation applied to sub_seq2(v1).triggered. Therefore,
-v1 does not flow out of the application of triggered to this instance, and the reference to v1 in do1 ==
-v1 is to an unassigned variable.
-In a single cycle, there can be multiple matches of a sequence instance to which triggered is applied, and
-these matches can have different valuations of the local variables. The multiple matches are treated
-semantically the same way as matching both disjuncts of an or (see the following). In other words, the
-thread evaluating the instance to which triggered is applied will fork to account for such distinct local
-variable valuations.
-When a local variable is a formal argument of a sequence declaration, it is illegal to declare the variable, as
-shown in the following example: 
+```
+
+第二个条件被违反，因为否定应用于 `sub_seq2(v1).triggered`。因此，v1 不会从应用 triggered 到此实例的应用中流出，do1 == v1 中的引用是一个未分配的变量。
+
+在一个时钟周期内，可以有多个应用了 `triggered` 的命名序列实例的匹配，这些匹配可以具有不同的局部变量值。多个匹配在语义上与匹配 `or` 的两个分支相同。换句话说，评估应用了 `triggered` 的实例的线程将分叉以考虑这种不同的局部变量值。
+
+当局部变量作为序列声明的形式参数时，声明该变量是非法的，如下面的示例所示：
+```verilog
 sequence sub_seq3(lv);
-int lv; // illegal because lv is a formal argument
-(a ##1 !a, lv = data_in) ##1 !b[*0:$] ##1 b && (data_out == lv);
+    int lv; // 因为 lv 是一个形式参数，所以是非法的
+    (a ##1 !a, lv = data_in) ##1 !b[*0:$] ##1 b && (data_out == lv);
 endsequence
-There are special considerations when using local variables in sequences involving the branching operators
-or, and, and intersect. The evaluation of a composite sequence constructed from one of these operators
-can be thought of as forking two threads to evaluate the operand sequences in parallel. A local variable may
-have been assigned a value before the start of the evaluation of the composite sequence, either from an
-initialization assignment or from an assignment attached to a preceding subsequence. Such a local variable
-is said to flow in to each of the operand sequences. The local variable may be assigned or reassigned in one
-or both of the operand sequences. In general, there is no guarantee that evaluation of the two threads results
-in consistent values for the local variable, or even that there is a consistent view of whether the local variable
-has been assigned a value. Therefore, the values assigned to the local variable before and during the
-evaluation of the composite sequence are not always allowed to be visible after the evaluation of the
-composite sequence.
-In some cases, inconsistency in the view of the local variable’s value does not matter, while in others it does.
-Precise conditions are given in F.5.4 to define static (i.e., compile-time computable) conditions under which
-a sufficiently consistent view of the local variable’s value after the evaluation of the composite sequence is
-provided. If these conditions are satisfied, then the local variable is said to flow out of the composite
-sequence. Otherwise, the local variable shall become unassigned at the end of the composite sequence. An
-intuitive description of the conditions for local variable flow follows:
-a) Variables assigned on parallel threads cannot be accessed in sibling threads. For example:
+```
+
+在使用分支运算符 `or`、`and` 和 `intersect` 的序列中使用局部变量时，有特殊的考虑。由这些运算符其中一个构造的复合序列的评估可以被认为是在并行评估操作数序列的两个线程中分叉。局部变量可能在复合序列的评估开始之前被赋值，或者从初始化赋值或者从前面的子序列的赋值中被赋值。这样的局部变量被认为 *流入* 每个操作数序列。这种局部变量可能在一个或两个操作数序列中被赋值或重新赋值。一般来说，不能保证两个线程的局部变量的值是一致的，甚至不能保证局部变量是否被赋值。因此，复合序列计算之前和期间的赋给局部变量的值并不总是允许在复合序列的评估之后可见。
+
+在某些情况下，局部变量的值的一致性并不重要，而在其他情况下则很重要。在 F.5.4 中给出了定义局部变量在复合序列的评估之后是否可见的静态（即，编译时可计算的）条件。如果满足这些条件，则局部变量被认为 *流出* 复合序列。否则，局部变量在复合序列的末尾将变得未分配。局部变量流的条件的直观描述如下：
+ - 在并行线程中赋值的变量不能在兄弟线程中访问。例如：
+```verilog
 sequence s4;
-int x;
- (a ##1 (b, x = data) ##1 c) or (d ##1 (e==x)); // illegal
+    int x;
+    (a ##1 (b, x = data) ##1 c) or (d ##1 (e==x)); // 非法
 endsequence
-b) In the case of or, a local variable flows out of the composite sequence if, and only if, it flows out of
-each of the operand sequences. If the local variable is not assigned before the start of the composite
-sequence and it is assigned in only one of the operand sequences, then it does not flow out of the
-composite sequence. 
-c) Each thread for an operand of an or that matches its operand sequence continues as a separate
-thread, carrying with it its own latest assignments to the local variables that flow out of the
-composite sequence. These threads do not have to have consistent valuations for the local variables.
-For example:
+```
+
+ - 在或运算中，局部变量流出复合序列，当且仅当它从每个操作数序列中流出。如果局部变量在复合序列的开始之前没有被赋值，并且它只在一个操作数序列中被赋值，则它不会从复合序列中流出。
+ - 与操作数序列匹配的每个线程作为一个单独的线程继续，带有它自己的局部变量的最新赋值，这些局部变量流出复合序列。这些线程不必具有局部变量的一致值。例如：
+```verilog
 sequence s5;
-int x,y;
-((a ##1 (b, x = data, y = data1) ##1 c)
-or (d ##1 (`true, x = data) ##0 (e==x))) ##1 (y==data2);
-// illegal because y is not in the intersection
+    int x,y;
+    ((a ##1 (b, x = data, y = data1) ##1 c) or (d ##1 (`true, x = data) ##0 (e==x))) ##1 (y==data2); // 非法，因为 y 不在交集中
 endsequence
+
 sequence s6;
-int x,y;
-((a ##1 (b, x = data, y = data1) ##1 c)
-or (d ##1 (`true, x = data) ##0 (e==x))) ##1 (x==data2);
-// legal because x is in the intersection
+    int x,y;
+    ((a ##1 (b, x = data, y = data1) ##1 c) or (d ##1 (`true, x = data) ##0 (e==x))) ##1 (x==data2); // 合法，因为 x 在交集中
 endsequence
-d) In the case of and and intersect, a local variable that flows out of at least one operand shall flow
-out of the composite sequence unless it is blocked. A local variable is blocked from flowing out of
-the composite sequence if either of the following statements applies: 
-1) The local variable is assigned in and flows out of each operand of the composite sequence, or
-2) The local variable is blocked from flowing out of at least one of the operand sequences.
-The value of a local variable that flows out of the composite sequence is the latest assigned value.
-The threads for the two operands are merged into one at completion of evaluation of the composite
-sequence. 
+```
+
+ - 在与和交集的情况下，至少一个操作数流出的局部变量应流出复合序列，除非它被阻止。局部变量被阻止从复合序列流出的条件是：
+   - 局部变量在每个操作数中被赋值并且流出复合序列，或者
+   - 局部变量被阻止从至少一个操作数序列流出。
+流出复合序列的局部变量的值是最新赋值的值。两个操作数的线程在复合序列的评估结束时合并为一个。
+
+```verilog
 sequence s7;
-int x,y;
-((a ##1 (b, x = data, y = data1) ##1 c)
-and (d ##1 (`true, x = data) ##0 (e==x))) ##1 (x==data2);
-// illegal because x is common to both threads
+    int x,y;
+    ((a ##1 (b, x = data, y = data1) ##1 c) and (d ##1 (`true, x = data) ##0 (e==x))) ##1 (x==data2); // 非法，因为 x 是两个线程的公共变量
 endsequence
+
 sequence s8;
-int x,y;
-(a ##1 (b, x = data, y = data1) ##1 c)
-and (d ##1 (`true, x = data) ##0 (e==x))) ##1 (y==data2);
-// legal because y is in the difference
+    int x,y;
+    (a ##1 (b, x = data, y = data1) ##1 c) and (d ##1 (`true, x = data) ##0 (e==x))) ##1 (y==data2); // 合法，因为 y 在差集中
 endsequence
+```
+
+## 16.11 在序列匹配时调用子程序
+在成功匹配序列的非空序列的末尾，可以调用任务、任务方法、无函数、无函数方法和系统任务。子程序调用，如局部变量赋值一样，出现在序列后面的逗号分隔列表中。子程序调用被称为附加到序列。附加的子程序调用或任何序列_match_item 附加到不允许空匹配的序列是一个错误。序列和后面的列表用括号括起来（见 语法 16-15）。
+---
+```verilog
+sequence_expr ::= // from A.2.10
+... 
+| ( sequence_expr {, sequence_match_item} ) [ sequence_abbrev ] 
+... 
+sequence_match_item ::= 
+operator_assignment 
+| inc_or_dec_expression 
+| subroutine_call 
+```
+---
+语法 16-15—序列语法中的子程序调用（摘自附录 A）
+
+例如：
+```verilog
+sequence s1;
+    logic v, w;
+    (a, v = e) ##1 
+    (b[->1], w = f, $display("b after a with v = %h, w = %h\n", v, w));
+endsequence
+```
+
+定义了一个序列 s1，该序列在 a 的第一次出现后严格匹配 b。在匹配时，执行系统任务 $display 来写一个消息，宣布匹配并显示分配给局部变量 v 和 w 的值。
+
+附加到序列的所有子程序调用都在每次成功匹配序列时执行。对于每次成功匹配，附加的调用按它们在列表中出现的顺序执行。断言评估不会等待或接收来自任何附加子程序的数据。子程序被调度在 Reactive 区域，就像动作块一样。
+
+附加到序列的每个子程序调用的参数应该作为输入按值传递，或者作为引用传递（ref 或 const ref；见 13.5.2）。作为值传递的实际参数表达式使用底层变量的采样值，并且与用于评估序列匹配的变量值一致。作为输入值传递的变量应该是 16.6 中允许的类型。自动变量可以作为程序代码中断言语句中的子程序调用的常量输入传递（见 16.14.6.1）。自动变量不得作为引用传递，也不得作为程序代码中断言语句中的子程序调用的非常量输入传递。将动态数组、队列和关联数组的元素作为 ref 参数传递的规则在 13.5.2 中描述。
+
+局部变量可以传递到附加到序列的子程序调用中。在序列后面的列表中的子程序调用之前流出序列或在序列后面的列表中分配的任何局部变量都可以在调用的实际参数表达式中使用。如果局部变量出现在实际参数表达式中，则该参数应该按值传递。
+
+## 16.12 声明属性
+属性定义了设计的行为。命名属性可以用于验证作为假设、义务或覆盖规范。为了使用行为进行验证，必须使用 assert、assume 或 cover 语句。属性声明本身不产生任何结果。
+
+可以在以下任何地方声明命名属性：
+ - 模块
+ - 接口
+ - 程序
+ - 时钟块
+ - 包
+ - 编译单元范围
+ - 生成块
+ - 检查器
+
+为了声明命名属性，使用属性构造，如语法 16-16 所示。
+---
+```verilog
+assertion_item_declaration ::= // from A.2.10
+property_declaration 
+... 
+property_declaration ::= 
+property property_identifier [ ( [ property_port_list ] ) ] ;
+{ assertion_variable_declaration } 
+ property_spec [ ; ] 
+endproperty [ : property_identifier ] 
+property_port_list ::= 
+property_port_item {, property_port_item} 
+property_port_item ::= 
+{ attribute_instance } [ local [ property_lvar_port_direction ] ] property_formal_type
+property_lvar_port_direction ::= input
+property_formal_type ::= 
+sequence_formal_type 
+| property
+property_spec ::= 
+[clocking_event ] [ disable iff ( expression_or_dist ) ] property_expr 
+property_expr ::= 
+sequence_expr 
+| strong ( sequence_expr )
+| weak ( sequence_expr )
+| ( property_expr )
+| not property_expr 
+| property_expr or property_expr 
+| property_expr and property_expr 
+| sequence_expr |-> property_expr 
+| sequence_expr |=> property_expr 
+| if ( expression_or_dist ) property_expr [ else property_expr ] 
+| case ( expression_or_dist ) property_case_item { property_case_item } endcase
+| sequence_expr #-# property_expr 
+| sequence_expr #=# property_expr 
+| nexttime property_expr 
+| nexttime [ constant _expression ] property_expr 
+| s_nexttime property_expr 
+| s_nexttime [ constant_expression ] property_expr 
+| always property_expr 
+| always [ cycle_delay_const_range_expression ] property_expr 
+| s_always [ constant_range ] property_expr 
+| s_eventually property_expr 
+| eventually [ constant_range ] property_expr 
+| s_eventually [ cycle_delay_const_range_expression ] property_expr 
+| property_expr until property_expr 
+| property_expr s_until property_expr 
+| property_expr until_with property_expr 
+| property_expr s_until_with property_expr 
+| property_expr implies property_expr 
+| property_expr iff property_expr
+| accept_on ( expression_or_dist ) property_expr 
+| reject_on ( expression_or_dist ) property_expr 
+| sync_accept_on ( expression_or_dist ) property_expr 
+| sync_reject_on ( expression_or_dist ) property_expr 
+| property_instance 
+| clocking_event property_expr 
+property_case_item::= 
+expression_or_dist { , expression_or_dist } : property_expr [ ; ] 
+| default [ : ] property_expr [ ; ] 
+assertion_variable_declaration ::= 
+var_data_type list_of_variable_decl_assignments ;
+property_instance ::= 
+ps_or_hierarchical_property_identifier [ ( [ property_list_of_arguments ] ) ] 
+property_list_of_arguments ::= 
+[property_actual_arg] { , [property_actual_arg] } { , . identifier ( [property_actual_arg] ) }
+| . identifier ( [property_actual_arg] ) { , . identifier ( [property_actual_arg] ) } 
+property_actual_arg ::= 
+property_expr 
+| sequence_actual_arg 
+```
+---
+语法 16-16—属性构造语法（摘自附录 A）
+
+命名属性可以在可选的 property_port_list 中声明形式参数。
+
+除了在 16.12.18、16.12.19 和 16.12.17 中描述的情况外，在命名属性中声明形式参数和默认实际参数的规则以及使用实际参数实例化命名属性的规则与在 16.8、16.8.1 和 16.8.2 中描述的命名序列的规则相同。
+
+命名属性中规定和使用形式参数的规则特别讨论在 16.12.18 中。
+
+命名属性中规定和使用局部变量形式参数的规则特别讨论在 16.12.19 中。
+
+在命名属性的声明的 body property_spec 中可以引用形式参数。对形式参数的引用可以写在各种语法实体的位置，包括除 16.8 中列出的语法实体之外的以下语法实体：
+ - property_expr
+ - property_spec
+
+命名属性可以在其声明之前实例化。命名属性可以在可以写 property_spec 的任何地方实例化。命名属性可以在可以写 property_expr 的地方实例化，前提是实例不生成非法的 disable iff 子句（见下文）。命名属性的实例之间可能存在循环依赖。如果，且仅如果，存在一个有向图中的循环，其节点是命名属性，其边由以下规则定义：如果第一个命名属性在其声明中实例化第二个命名属性，包括在默认实际参数的声明中实例化第二个命名属性的实例，或者第一个命名属性的实例在实际参数中实例化第二个命名属性，则从第一个命名属性到第二个命名属性有一个有向边。具有这种循环依赖的命名属性称为递归的，并在 16.12.17 中讨论。
+
+如果 `$` 是命名属性实例的实际参数，则相应的形式参数应该是无类型的，并且其引用应该是 cycle_delay_const_range_expression 中的上界，或者应该本身是命名序列或属性的实际参数。
+
+非递归命名属性的行为和语义与通过 F.4.1 中定义的重写算法从命名属性的声明的主体中获得的展开属性的行为和语义相同。重写算法在命名属性的声明的主体中的实际参数替换相应的形式参数的引用。重写算法本身不考虑名称解析，并假定在替换实际参数之前已解析名称。如果展开的属性不合法，则实例不合法，并且应该有一个错误。
+
+属性评估的结果是 true 或 false。属性可以使用实例化和在以下子句中描述的运算符构建属性。
+
+表 16-3 列出了从最高到最低优先级的序列和属性运算符，并显示了非一元运算符的结合性。强序列运算符和弱序列运算符的优先级未定义，因为这些运算符需要括号。表 11-2 中描述的运算符的优先级高于序列和属性运算符。
+
+表 16-3—序列和属性运算符优先级和结合性
+| 序列运算符 | 属性运算符 | 结合性 |
+| --- | --- | --- |
+| `[*]`, `[=]`, `[->]` | | — |
+| `##` | | 左 |
+| `throughout` | | 右 |
+| `within` | | 左 |
+| `intersect` | | 左 |
+| | `not`, `nexttime`, `s_nexttime` | — |
+| `and` | `and` | 左 |
+| `or` | `or` | 左 |
+| | `iff` | 右 |
+| | `until`, `s_until`, `until_with`, `s_until_with`, `implies` | 右 |
+| | `|->`, `|=>`, `#-#`, `#=#` | 右 |
+| | `always`, `s_always`, `eventually`, `s_eventually`, `if-else`, `case`, `accept_on`, `reject_on`, `sync_accept_on`, `sync_reject_on` | — |
+
+可以将 disable iff 子句附加到 property_expr 以生成 property_spec。
+```verilog
+disable iff ( expression_or_dist ) property_expr
+```
+
+disable iff 的表达式称为 disable 条件。disable iff 子句允许指定预先重置。对于属性_spec 的评估，将评估底层 property_expr。如果在观察区域的尝试开始和结束之间的任何时间 disable 条件为 true，则属性的整体评估结果为 disabled。属性的 disabled 评估不会导致成功或失败。否则，属性_spec 的评估与 property_expr 的评估相同。对于不同的属性_spec 评估尝试，将独立测试 disable 条件。在 disable 条件中使用的变量的值是当前模拟周期中的值，即未采样的值。表达式可以通过使用该方法的触发器引用序列的端点来引用序列的端点。disable 条件不得包含对局部变量或匹配的序列方法的引用。如果在 disable 条件中使用除 $sampled 之外的采样值函数，则采样时钟应在其实际参数列表中明确指定，如 16.9.3 中所述。disable iff 子句的嵌套，无论是显式还是通过属性实例化，都是非法的。
+
+### 16.12.1 序列属性
+序列属性有三种形式：sequence_expr、`weak`(sequence_expr) 和 `strong`(sequence_expr)。`strong` 和 `weak` 运算符称为 *序列运算符*。strong(sequence_expr) 仅在 sequence_expr 有非空匹配时为 true。weak(sequence_expr) 仅在没有证据表明无法匹配 sequence_expr 的有限前缀时为 true。顺序属性的序列_expr 不得允许空匹配。
+
+如果省略了强序列或弱序列运算符，则 sequence_expr 的评估取决于使用它的断言语句。如果断言语句是 assert property 或 assume property，则 sequence_expr 被评估为 weak(sequence_expr)。否则，sequence_expr 被评估为 strong(sequence_expr)。
+
+注意—IEEE 1800-2009 和 IEEE 1800-2012 对于 sequence_expr 定义的语义与 IEEE Std 1800-2005 不兼容。IEEE 1800-2009 和 IEEE 1800-2012 中与 IEEE Std 1800-2005 中定义的 sequence_expr 等效的是 strong(sequence_expr)。
+
+由于 strong(sequence_expr) 仅需要一次 sequence_expr 的匹配，因此 strong(sequence_expr) 为 true 当且仅当属性 strong(first_match(sequence_expr)) 为 true。
+
+类似地，属性 weak(sequence_expr) 为 true 当且仅当属性 weak(first_match(sequence_expr)) 为 true。这是因为前缀证明无法匹配 sequence_expr 当且仅当它证明无法匹配 first_match(sequence_expr)。
+
+以下示例说明了顺序属性形式： 
+```verilog
+property p3;
+    b ##1 c;
+endproperty
+
+c1: cover property (@(posedge clk) a #-# p3);
+a1: assert property (@(posedge clk) a |-> p3);
+```
+
+在覆盖属性 c1 中，顺序属性 p3 被解释为强序列。c1 的评估尝试返回 true 当且仅当 a 在尝试开始时的 posedge clk 时为 true，并且满足以下两个条件：
+ - b 在尝试开始时的 posedge clk 时为 true。
+ - 如果存在 posedge clk 的后续时刻，则 c 在第一个这样的时刻为 true。
+
+在断言属性 a1 中，顺序属性 p3 被解释为弱序列。a1 的评估尝试返回 true 当且仅当 a 在尝试开始时的 posedge clk 时为 false，或者满足以下两个条件：
+ - b 在尝试开始时的 posedge clk 时为 true。
+ - 如果存在 posedge clk 的后续时刻，则 c 在第一个这样的时刻为 true。
+
+
+
