@@ -2233,5 +2233,541 @@ a1: assert property (@(posedge clk) a |-> p3);
  - b 在尝试开始时的 posedge clk 时为 true。
  - 如果存在 posedge clk 的后续时刻，则 c 在第一个这样的时刻为 true。
 
+### 16.12.2 否定属性
+如果属性具有形式 `not` property_expr，则该属性是一个 *否定属性*。对于属性的每次评估尝试，有一个 property_expr 的评估尝试。关键字 not 表明属性的评估结果与 property_expr 的评估结果相反。因此，如果 property_expr 为 true，则否定属性为 false；如果 property_expr 为 false，则否定属性为 true。
+
+`not` 运算符切换属性的强度。特别是，当否定一个序列时，应谨慎。例如，考虑以下断言：
+```verilog
+a1: assert property (@clk not a ##1 b);
+```
+
+由于在断言中使用了序列属性 `a ##1 b`，因此它是弱的。这意味着如果 clk 停止计数，并且 a 在 clk 的最后一个时刻为 true，则弱序列属性 a ##1 b 也将从该时刻开始保持，因此断言 a1 将失败。在这种情况下，更合理的是使用：
+```verilog
+a2: assert property (@clk not strong(a ##1 b));
+```
+
+### 16.12.3 或属性
+*或* 属性具有以下形式： 
+```verilog
+property_expr or property_expr
+```
+
+如果至少有一个 property_expr1 和 property_expr2 为 true，则属性为 true。
+
+### 16.12.4 与属性
+*与* 属性具有以下形式： 
+```verilog
+property_expr and property_expr
+```
+
+如果 property_expr1 和 property_expr2 均为 true，则属性为 true。
+
+### 16.12.5 如果-否则属性
+*如果-否则* 属性具有以下形式之一： 
+```verilog
+if ( expression_or_dist ) property_expr
+```
+
+或者
+```verilog
+if ( expression_or_dist ) property_expr else property_expr
+```
+
+第一种形式的属性在 expression_or_dist 为 false 或 property_expr 为 true 时为 true。第二种形式的属性在 expression_or_dist 为 true 且 property_expr1 为 true 或 expression_or_dist 为 false 且 property_expr2 为 true 时为 true。
+
+### 16.12.6 蕴含
+蕴含构造指定在顺序前提匹配的条件下执行属性的检查（见 语法 16-17）。
+---
+```verilog
+property_expr ::= // from A.2.10
+... 
+| sequence_expr |-> property_expr 
+| sequence_expr |=> property_expr
+```
+---
+语法 16-17—蕴含语法（摘自附录 A）
+
+此构造用于预先条件监视属性表达式，并允许在属性级别使用。蕴含的结果是 true 或 false。左操作数 sequence_expr 称为 *前提*，而右操作数 property_expr 称为 *结果*。
+
+对于 `|->` 蕴含有下列注意事项：
+ - 从给定的起始点，前提 sequence_expr 可以有零个、一个或多个成功匹配。
+ - 如果没有从给定的起始点匹配前提 sequence_expr，则从该起始点开始的蕴含的评估成功并返回 true。
+ - 对于前提 sequence_expr 的每个成功匹配，结果 property_expr 都会单独评估。前提 sequence_expr 的匹配结束点是结果 property_expr 评估的起始点。
+ - 从给定的起始点，蕴含的评估成功并返回 true 当且仅当对于从该起始点开始的前提 sequence_expr 的每个匹配，从该匹配的结束点开始的结果 property_expr 的评估成功并返回 true。
+
+提供了两种形式的蕴含：使用运算符 `|->` 的重叠蕴含和使用运算符 `|=>` 的非重叠蕴含。对于重叠蕴含，如果前提 sequence_expr 有匹配，则匹配的结束点是结果 property_expr 的评估的起始点。对于非重叠蕴含，结果 property_expr 的评估的起始点是匹配的结束点的下一个时钟节拍。因此，
+```verilog
+sequence_expr |=> property_expr
+```
+
+等效于以下内容：
+```verilog
+sequence_expr ##1 `true |-> property_expr
+```
+
+当涉及多时钟序列和属性时，使用蕴含的情况在 16.13 中解释。
+
+以下示例说明了从主设备传输数据到目标设备的总线操作。当总线进入数据传输阶段时，可以发生多个数据阶段以传输数据块。在数据传输阶段期间，数据阶段在断言的任何上升时钟边沿上完成，irdy 被断言，并且 trdy 或 stop 被断言。在此示例中，断言的信号表示为低值。对于数据阶段的结束的要求可以表示如下：
+```verilog
+property data_end;
+    @(posedge mclk)
+    $rose(data_phase) |-> ##[1,5] ((irdy==0) && ($fell(trdy) || $fell(stop)));
+endproperty
+```
+
+每次序列 `$rose(data_phase)` 匹配时，开始评估结果属性。在图 16-14 中，`$rose(data_phase)` 的匹配发生在时钟节拍 2。这开始了结果属性的评估。然后，在时钟节拍 6，data_end 评估为 true，因为 `$fell(stop)` 和 `irdy==0` 都评估为 true。
+
+在另一个示例中，data_end_exp 用于验证 frame 在 data_end_exp 发生后的两个时钟节拍内取消断言（值为高）。此外，还要求在 frame 取消断言后的两个时钟节拍内取消断言 irdy（值为高）。
+
+![Conditional sequence matching](16-14.png)
+
+图 16-14—条件序列匹配
+
+编写用于表达此条件的属性如下：
+```verilog
+`define data_end_exp (data_phase && ((irdy==0)&&($fell(trdy)||$fell(stop))))
+property data_end_rule1;
+    @(posedge mclk)
+    `data_end_exp |-> ##[1:2] $rose(frame) ##1 $rose(irdy);
+endproperty
+```
+
+属性 data_end_rule1 首先在每个时钟节拍评估 data_end_exp 以测试其值是否为 true。如果值为 false，则将该特定尝试评估为 true。否则，将评估以下序列：
+```verilog
+##[1:2] $rose(frame) ##1 $rose(irdy)
+```
+
+该序列指定在未来两个时钟节拍内查找 frame 的上升沿。在 frame 切换为高电平后的一个时钟节拍内，irdy 也必须切换为高。这在图 16-15 中时钟节拍 6 的评估尝试进行了说明。`` `data_end_exp `` 在时钟节拍 6 被确认。接下来，frame 在时钟节拍 7 切换为高电平。因为这在 `[1:2]` 强制约束的时间限制内，它满足序列并继续进一步评估。在时钟节拍 8，irdy 被评估。信号 irdy 在时钟节拍 8 切换为高电平，完全匹配了从时钟节拍 6 开始的尝试的序列规范。
+
+一般，断言与前提相关联，以便只在满足特定条件时执行检查。如前面的示例所示，`|->` 运算符提供了这种能力，以指定在评估属性之前必须满足的条件。下一个示例修改前面的示例，以查看删除断言的前提对断言结果的影响。如下所示，并在图 16-16 中说明。
+```verilog
+property data_end_rule2;
+    @(posedge mclk) ##[1:2] $rose(frame) ##1 $rose(irdy);
+endproperty
+```
+
+![Conditional sequences](16-15.png)
+
+图 16-15—条件序列
+
+![Results without the condition](16-16.png)
+
+图 16-16—没有条件的结果
+
+属性在每个时钟节拍评估。对于时钟节拍 1 的评估，信号 frame 的上升沿不会在时钟节拍 2 或 3 发生，因此属性在时钟节拍 1 失败。类似地，在时钟节拍 2、3 和 4 失败。从时钟节拍 5 和 6 开始的尝试，信号 frame 在时钟节拍 7 上升沿允许进一步检查。在时钟节拍 8，序列根据规范完成，导致在时钟节拍 5 和 6 开始的尝试匹配。所有后续尝试匹配序列失败，因为 `$rose(frame)` 不再发生。
+
+图 16-16 显示，删除检查 `data_end_exp` 的前提导致与验证目标无关的失败。从验证的角度来看，确定这些前提条件并使用它们来过滤不适当或多余的情况是很重要的。
+
+一个前提是序列的蕴含示例如下：
+```verilog
+(a ##1 b ##1 c) |-> (d ##1 e)
+```
+
+如果序列 `(a ##1 b ##1 c)` 匹配，则序列 `(d ##1 e)` 必须匹配。另一方面，如果序列 `(a ##1 b ##1 c)` 不匹配，则结果为 true。
+
+另一个蕴含的示例如下：
+```verilog
+property p16;
+    (write_en & data_valid) ##0 
+    (write_en && (retire_address[0:4]==addr)) [*2] |-> 
+    ##[3:8] write_en && !data_valid &&(write_address[0:4]==addr);
+endproperty
+```
+
+此属性可以编码为嵌套蕴含：
+```verilog
+property p16_nested;
+    (write_en & data_valid) |->
+        (write_en && (retire_address[0:4]==addr)) [*2] |-> 
+            ##[3:8] write_en && !data_valid && (write_address[0:4]==addr);
+endproperty
+```
+
+多时钟序列蕴含在 16.13 中解释。
+
+### 16.12.7 蕴含和 iff 属性
+如果属性具有以下形式，则该属性是一个 *蕴含* 属性：
+```verilog
+property_expr1 implies property_expr2
+```
+
+具有此形式的属性在以下情况下为 true：如果且仅当 property_expr1 评估为 false 或 property_expr2 评估为 true 时。
+
+如果属性具有以下形式，则该属性是一个 *iff* 属性：
+```verilog
+property_expr1 iff property_expr2
+```
+
+具有此形式的属性在以下情况下为 true：如果且仅当 property_expr1 评估为 false 并且 property_expr2 评估为 false 或 property_expr1 评估为 true 并且 property_expr2 评估为 true 时。
+
+### 16.12.8 属性实例化
+可以将命名属性的实例用作 property_expr 或 property_spec。一般来说，如果可以将命名属性的 body property_spec 替换为实例，则该实例是合法的，实际参数替换为形式参数，并且结果为合法的属性_expr 或 property_spec。例如，如果命名属性的实例用作属性构建运算符的 property_expr 操作数，则命名属性不得具有 `disable iff` 子句。
+
+### 16.12.9 跟随属性
+如果属性具有以下形式，则该属性是一个 *跟随* 属性，该形式使用在语法 16-18 中显示的跟随运算符。
+---
+```verilog
+property_expr ::= // from A.2.10
+... 
+| sequence_expr #-# property_expr 
+| sequence_expr #=# property_expr 
+```
+---
+语法 16-18—跟随语法（摘自附录 A）
+
+此子句用于触发属性表达式的监视，并允许在属性级别使用。
+
+跟随的结果是 true 或 false。左操作数 sequence_expr 称为 *前提*，而右操作数 property_expr 称为 *结果*。为了使跟随成功，必须满足以下条件：
+ - 从给定的起始点，前提 sequence_expr 必须至少有一个成功匹配。
+ - property_expr 必须从某个成功匹配的结束点开始成功评估。
+
+从给定的起始点，跟随的评估成功并返回 true 当且仅当存在前提 sequence_expr 的匹配，其中该匹配的结束点是结果 property_expr 的评估的起始点。
+
+提供了两种形式的跟随：使用运算符 `#-#` 的重叠跟随和使用运算符 `#=#` 的非重叠跟随。对于重叠跟随，如果前提 sequence_expr 有匹配，则匹配的结束点是结果 property_expr 的评估的起始点。对于非重叠跟随，结果 property_expr 的评估的起始点是匹配的结束点的下一个时钟节拍。
+
+跟随运算符是蕴含运算符的对偶。因此，sequence_expr `#-#` property_expr 等效于以下内容：
+```verilog
+not (sequence_expr |-> not property_expr)
+```
+
+sequence_expr `#=#` property_expr 等效于以下内容：
+```verilog
+not (sequence_expr |=> not property_expr)
+```
+
+例如：
+```verilog
+property p1;
+    ##[0:5] done #-# always !rst;
+endproperty
+
+property p2;
+    ##[0:5] done #=# always !rst;
+endproperty
+```
+
+属性 p1 表示 done 在前 6 个时钟节拍中的某个时钟节拍被断言，并且从 done 被断言的某个时钟节拍开始，rst 总是低电平。属性 p2 表示 done 在前 6 个时钟节拍中的某个时钟节拍被断言，并且从 done 被断言的某个时钟节拍的下一个时钟节拍开始，rst 总是低电平。
+
+sequence_expr `#-#` strong(sequence_expr1) 在语义上等效于 strong(sequence_expr ##0 sequence_expr1)，而 sequence_expr `#=#` strong(sequence_expr1) 在语义上等效于 strong(sequence_expr ##1 sequence_expr1)。
+
+跟随运算符特别适用于指定序列后跟属性的 `cover property` 指令。
+
+### 16.12.10 下次属性
+如果属性具有以下形式，则该属性是一个 *下次* 属性：
+ - 弱下次
+```verilog
+nexttime property_expr
+```
+弱下次属性 nexttime property_expr 仅在 property_expr 在下一个时钟节拍开始时为 true 或没有进一步的时钟节拍时为 true。
+
+ - 弱下次索引形式
+```verilog
+nexttime [ constant_expression ] property_expr
+```
+弱下次索引形式属性 nexttime [constant_expression] property_expr 仅在没有 constant_expression 个时钟节拍或 property_expr 在下 constant_expression 个时钟节拍开始时为 true。
+
+ - 强下次
+```verilog
+s_nexttime property_expr
+```
+强下次属性 s_nexttime property_expr 仅在存在下一个时钟节拍并且 property_expr 在该时钟节拍开始时为 true 时为 true。
+
+ - 强下次索引形式
+```verilog
+s_nexttime [ constant_expression ] property_expr
+```
+强下次索引形式属性 s_nexttime [constant_expression] property_expr 仅在存在 constant_expression 个时钟节拍并且 property_expr 在下 constant_expression 个时钟节拍开始时为 true 时为 true。
+
+constant_expression 给出的时钟节拍数应为非负整数常数表达式。
+
+前述解释是指在下次属性在下次属性的时钟节拍上评估时。当在不是下次属性的时钟节拍上评估下次属性时，下次属性的时钟的节拍应用对齐。因此，更精确地说，`s_nexttime[n]` property_expr 仅在存在 n+1 个下次属性的时钟节拍，包括当前时钟节拍时，property_expr 在 n+1 个时钟节拍上为 true 时为 true，其中计数从当前时钟节拍开始。特别是 `nexttime[0]` 和 `s_nexttime[0]` 作为对齐运算符。
+
+下例的注释描述了属性为 true 的条件：
+```verilog
+// 如果时钟再跳动一次，那么 a 在下一个时钟节拍开始时为 true
+property p1;
+    nexttime a;
+endproperty
+
+// 时钟再跳动一次，a 在下一个时钟节拍开始时为 true
+property p2;
+    s_nexttime a;
+endproperty
+
+// 只要时钟跳动，a 在从下一个时钟节拍开始的每个未来时钟节拍上为 true
+property p3;
+    nexttime always a;
+endproperty
+
+// 时钟至少再跳动一次，只要时钟跳动，a 在从下一个时钟节拍开始的每个时钟节拍上为 true
+property p4;
+    s_nexttime always a;
+endproperty
+
+// 如果时钟再跳动至少一次，那么 a 在未来某个时刻开始为 true
+property p5;
+    nexttime s_eventually a;
+endproperty
+
+// a 在严格未来的某个时刻为 true
+property p6;
+    s_nexttime s_eventually a;
+endproperty
+
+// 如果时钟再跳动至少两次，a 在第二个未来时钟节拍开始时为 true
+property p7;
+    nexttime[2] a;
+endproperty
+
+// 至少再跳动两次时钟，a 在第二个未来时钟节拍开始时为 true
+property p8;
+    s_nexttime[2] a;
+endproperty
+```
+
+### 16.12.11 总是属性
+属性是一个 *总是* 属性，如果它具有以下使用总是运算符的形式之一：
+ - 弱总是
+```verilog
+always property_expr
+```
+属性 always property_expr 仅在 property_expr 在每个当前或未来的时钟节拍上为 true 时为 true。
+
+ - 弱总是范围形式
+```verilog
+always [ cycle_delay_const_range_expression ] property_expr
+```
+属性 always [cycle_delay_const_range_expression] property_expr 仅在 property_expr 在 cycle_delay_const_range_expression 指定的时钟节拍范围内的每个当前或未来的时钟节拍上为 true 时为 true。不需要所有这个范围内的时钟节拍存在。弱总是的范围可以是无界的。
+
+ - 强总是范围形式
+```verilog
+s_always [ constant_range ] property_expr
+```
+属性 s_always [constant_range] property_expr 仅在 constant_range 指定的所有当前或未来的时钟节拍存在并且 property_expr 在这些时钟节拍上为 true 时为 true。强总是的范围应该是有界的。
+
+constant_range 指定的时钟节拍范围应遵循以下限制。时钟节拍的最小数量由非负整数常数表达式定义；时钟节拍的最大数量由非负整数常数表达式或 `$` 定义，表示有限但无界的最大数量。如果最小和最大时钟节拍数量由非负整数常数表达式定义（见 11.2.1），则最小数量应小于或等于最大数量。
+
+前述解释是指在总是属性在总是属性的时钟节拍上评估时。当在不是总是属性的时钟节拍上评估总是属性时，应用总是属性的时钟节拍的对齐。因此，更精确地说，`s_always[n:m]` property_expr 仅在存在 m+1 个总是属性的时钟节拍，包括当前时钟节拍时，property_expr 在 n+1 到 m+1 个时钟节拍上为 true 时为 true，其中计数从当前时钟节拍开始。
+
+与并发断言相关联的隐式总是属性也存在（见 16.5）。未放置在初始块中的验证语句指定其顶级属性的每次评估尝试应从其前导时钟事件的每次出现开始。在以下两个示例中，从验证语句 implicit_always 指定的 p 的评估尝试的顶级属性与从显式总是运算符中的 p 的评估尝试的 p 的评估尝试之间存在一对一的对应关系：
+
+隐式形式：
+```verilog
+implicit_always: assert property(p);
+```
+
+显式形式：
+```verilog
+initial explicit_always: assert property(always p);
+```
+
+这不是一个实际示例，而是用于说明总是的含义。
+
+示例：
+```verilog
+initial a1: assume property( @(posedge clk) reset[*5] #=# always !reset);
+
+property p1;
+    a ##1 b |=> always c;
+endproperty
+
+property p2;
+    always [2:5] a;
+endproperty
+
+property p3;
+    s_always [2:5] a;
+endproperty
+
+property p4;
+    always [2:$] a;
+endproperty
+
+property p5;
+    s_always [2:$] a; // 非法
+endproperty
+```
+
+断言 a1 表示 reset 在前 5 个时钟节拍中为 true，然后在计算的其余部分保持为 0。假设在第一个时钟节拍开始时评估。属性 p1 在第一个时钟节拍开始时为 true，如果 a 在第一个时钟节拍为 true 并且 b 在第二个时钟节拍为 true，则 c 应在第二个之后的每个时钟节拍为 true。属性 p2 和 p3 在第一个时钟节拍开始时为 true，如果 a 在第二个到第五个时钟节拍中的每个时钟节拍为 true，则为 true。属性 p3 要求这些时钟节拍存在，而属性 p2 不要求。属性 p4 在第一个时钟节拍开始时为 true，如果 a 在第二个时钟节拍后的每个时钟节拍为 true，则为 true。这些时钟节拍不需要存在。属性 p5 是非法的，因为在强总是属性中不允许指定无界范围。
+
+### 16.12.12 直到属性
+属性是一个 *直到* 属性，如果它具有以下使用直到运算符的形式之一：
+ - 弱不重叠
+```verilog
+property_expr1 until property_expr2
+```
+
+ - 强不重叠
+```verilog
+property_expr1 s_until property_expr2
+```
+
+ - 弱重叠
+```verilog
+property_expr1 until_with property_expr2
+```
+
+ - 强重叠
+```verilog
+property_expr1 s_until_with property_expr2
+```
+
+直到属性的非重叠形式计算为真，如果 property_expr1 在评估尝试的开始时钟节拍开始为 true，并且持续到 property_expr2 为 true 的至少一拍之前。直到属性的重叠形式计算为真，如果 property_expr1 在评估尝试的开始时钟节拍开始为 true，并且持续到 property_expr2 为 true 的时钟节拍。直到属性的一种强形式要求存在当前或未来的时钟节拍，其中 property_expr2 为 true，而直到属性的一种弱形式不要求这一点。直到属性的一种弱形式计算为真，如果 property_expr1 在每个时钟节拍为 true，即使 property_expr2 从未为真也是如此。
+
+示例：
+```verilog
+property p1;
+    a until b;
+endproperty
+
+property p2;
+    a s_until b;
+endproperty
+
+property p3;
+    a until_with b;
+endproperty
+
+property p4;
+    a s_until_with b;
+endproperty
+```
+
+属性 p1 计算为真，当且仅当 a 在评估尝试的开始时钟节拍开始为 true，并且持续到但不一定包括 property_expr2 为 true 的时钟节拍。如果不存在当前或未来的时钟节拍，其中 b 为 true，则 a 应在每个当前或未来的时钟节拍为 true。如果 b 在评估尝试的开始时钟节拍为 true，则 a 不必在该时钟节拍为 true。属性 p2 计算为真，如果存在当前或未来的时钟节拍，其中 b 为 true，并且 a 在评估尝试的开始时钟节拍开始为 true，并且持续到但不一定包括 b 为 true 的时钟节拍。如果 b 在评估尝试的开始时钟节拍为 true，则 a 不必在该时钟节拍为 true。属性 p3 计算为真，如果 a 在评估尝试的开始时钟节拍开始为 true，并且持续到包括 b 为 true 的时钟节拍为止。如果不存在当前或未来的时钟节拍，其中 b 为 true，则 a 应在每个当前或未来的时钟节拍为 true。属性 p4 计算为真，如果存在当前或未来的时钟节拍，其中 b 为 true，并且 a 在评估尝试的开始时钟节拍开始为 true，并且持续到包括 b 为 true 的时钟节拍为止。属性 p4 等效于 `strong(a[*1:$] ##0 b)`（这里 a 和 b 是布尔表达式）。
+
+### 16.12.13 最终属性
+属性是一个 *最终* 属性，如果它具有以下使用最终运算符的形式之一：
+ - 强最终
+```verilog
+s_eventually property_expr
+```
+
+属性 s_eventually property_expr 计算为真，当且仅当存在当前或未来的时钟节拍，其中 property_expr 为 true。
+
+ - 弱最终的范围形式
+```verilog
+eventually [ constant_range ] property_expr
+```
+
+属性 `eventually [constant_range] property_expr` 计算为真，当且仅当 constant_range 指定的范围内存在当前或未来的时钟节拍，其中 property_expr 为 true 或不是所有当前或未来的时钟节拍都存在。弱最终的范围应该是有界的。
+
+ - 强最终的范围形式
+```verilog
+s_eventually [ cycle_delay_const_range_expression ] property_expr
+```
+
+属性 `s_eventually [cycle_delay_const_range_expression] property_expr` 计算为真，当且仅当 cycle_delay_const_range_expression 指定的范围内存在当前或未来的时钟节拍，其中 property_expr 为 true。强最终的范围可以是无界的。
+
+在下面的示例中，a 和 b 是布尔表达式：
+```verilog
+property p1;
+    s_eventually a;
+endproperty
+
+property p2;
+    s_eventually always a;
+endproperty
+
+property p3;
+    always s_eventually a;
+endproperty
+
+property p4;
+    eventually [2:5] a;
+endproperty
+
+property p5;
+    s_eventually [2:5] a;
+endproperty
+
+property p6;
+    eventually [2:$] a; // 非法
+endproperty
+
+property p7;
+    s_eventually [2:$] a;
+endproperty
+```
+
+属性 p1 计算为真，当且仅当存在当前或未来的时钟节拍，其中 a 为 true。它等效于 `strong(##[*0:$] a)`。属性 p2 计算为真，当且仅当存在当前或未来的时钟节拍，其中 a 为 true，并且它在每个后续时钟节拍上也为 true。在具有无限多个时钟节拍的计算中，属性 p3 计算为真，当且仅当 a 在这些时钟节拍中的无限多个时钟节拍上为 true。在具有有限多个时钟节拍的计算中，属性 p3 计算为真，只要至少有一个时钟节拍，那么 a 保持在最后一拍。属性 p4 计算为真，只要从开始时钟节拍的第二个到第五个时钟节拍中的某个时钟节拍开始，a 为 true。p4 等效于 `weak(##[2:5] a)`。属性 p5 计算为真，只要从开始时钟节拍的第二个到第五个时钟节拍中内的某个时钟节拍，a 为 true。p5 等效于 `strong(##[2:5] a)`。属性 p7 计算为真，当且仅当 a 为 true，并且它不早于开始时钟节拍的第二个时钟节拍。
+
+前述解释是指在最终属性在最终属性的时钟节拍上评估时。当在不是最终属性的时钟节拍上评估最终属性时，应用最终属性的时钟节拍的对齐。因此，更精确地说，`s_eventually[n:m]` property_expr 计算为真，当且仅当存在 n+1 个最终属性的时钟节拍，包括当前时钟节拍时，property_expr 在 n+1 到 m+1 个时钟节拍上为 true 时为真，其中计数从当前时钟节拍开始。
+
+### 16.12.14 终止属性
+如果属性具有以下形式，则该属性是一个终止属性：
+```verilog
+accept_on ( expression_or_dist ) property_expr
+reject_on ( expression_or_dist ) property_expr
+sync_accept_on ( expression_or_dist ) property_expr
+sync_reject_on ( expression_or_dist ) property_expr
+```
+
+其中 expression_or_dist 称为 *终止条件*。属性 `accept_on` 和 `reject_on` 称为 *异步终止属性*，而属性 `sync_accept_on` 和 `sync_reject_on` 称为 *同步终止属性*。
+
+对 `accept_on` (expression_or_dist) property_expr 和 `sync_accept_on` (expression_or_dist) property_expr 的评估会导致对底层 property_expr 的评估。如果在评估过程中终止条件为 true，则属性的整体评估结果为 true。否则，属性的整体评估等于 property_expr 的评估。
+
+对 `reject_on` (expression_or_dist) property_expr 和 `sync_reject_on` (expression_or_dist) property_expr 的评估会导致对底层 property_expr 的评估。如果在评估过程中终止条件为 true，则属性的整体评估结果为 false。否则，属性的整体评估等于 property_expr 的评估。
+
+`accept_on` 和 `reject_on` 运算符在仿真时间步长的粒度上进行评估，就像 `disable iff` 一样，但是它们的终止条件使用采样值作为断言中的常规布尔表达式。`accept_on` 和 `reject_on` 运算符表示异步复位。
+
+`sync_accept_on` 和 `sync_reject_on` 运算符在发生时钟事件的仿真时间步长进行评估，不像 `disable iff`、`accept_on` 和 `reject_on`。它们的终止条件使用采样值，就像 `accept_on` 和 `reject_on` 一样。`sync_accept_on` 和 `sync_reject_on` 表示同步复位。
+
+`accept_on` 的语义类似于 `disable iff`，但有以下区别：
+ - `accept_on` 在属性级别操作，而不是并发断言级别。
+ - `accept_on` 使用采样值。
+ - 当 `disable iff` 中的禁用条件可能导致禁用属性规范的评估时，`accept_on` 中的终止条件可能导致属性规范的评估为 true。
+
+`reject_on(expression_or_dist) property_expr` 的语义与 `not(accept_on(expression_or_dist) not(property_expr))` 相同。
+
+`sync_accept_on` 的语义类似于 `accept_on`，但它仅在发生时钟事件的仿真时间步长进行评估。
+
+`sync_reject_on(expression_or_dist) property_expr` 的语义与 `not(sync_accept_on(expression_or_dist) not(property_expr))` 相同。
+
+任何嵌套的终止运算符 `accept_on`、`reject_on`、`sync_accept_on` 和 `sync_reject_on` 都是允许的。
+
+例如，每当 go 为高电平，后跟两次 get 为高电平，然后 stop 不能在 put 断言两次之后（不一定是连续的）之前为高电平。
+```verilog
+assert property (@(clk) go ##1 get[*2] |-> reject_on(stop) put[->2]);
+```
+
+在此示例中，stop 是一个异步终止，其值在 clk 的节拍之间检查。以下是相同示例的同步版本：
+```verilog
+assert property (@(clk) go ##1 get[*2] |-> sync_reject_on(stop) put[->2]);
+```
+
+在此示例中，stop 仅在 clk 节拍时检查。后一个断言也可以写成如下形式：
+```verilog
+assert property (@(clk) go ##1 get[*2] |-> !stop throughout put[->2]);
+```
+
+当终止条件发生在 property_expr 结束的同一时间步时，终止条件优先。例如：
+```verilog
+property p; (accept_on(a) p1) and (reject_on(b) p2); endproperty
+```
+
+如果 a 在评估 p1 期间变为 true，则在决定 p 的真实性时将忽略第一项。另一方面，如果 b 在评估 p2 期间变为 true，则 p 为 false。
+
+```verilog
+property p; (accept_on(a) p1) or (reject_on(b) p2); endproperty
+```
+
+如果 a 在评估 p1 期间变为 true，则 p 为 true。另一方面，如果 b 在评估 p2 期间变为 true，则在决定 p 的真实性时将忽略第二项。
+
+```verilog
+property p; not (accept_on(a) p1); endproperty
+```
+
+`not` 反转终止运算符的效果。因此，如果 a 在评估 p1 期间变为 true，则属性 p 为 false。
+
+嵌套的终止运算符 `accept_on`、`reject_on`、`sync_accept_on` 和 `sync_reject_on` 按词法顺序（从左到右）进行评估。因此，如果两个嵌套运算符条件在相同的时间步骤中变为 true，则最外层运算符优先。例如：
+```verilog
+property p; accept_on(a) reject_on(b) p1; endproperty
+```
+
+如果 a 在 p1 评估期间和 b 在同一拍中变为 true，则 p 在该时间步骤中成功。如果 b 在 a 之前并在 p1 评估期间变为 true，则 p 失败。
+
+终止条件可能包含采样值函数（见 16.9.3）。当终止条件中使用除 `$sampled` 之外的采样值函数时，应明确指定时钟参数。终止条件不得包含任何局部变量和序列方法 triggered 和 matched 的引用。
+
+
 
 
