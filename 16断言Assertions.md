@@ -2768,6 +2768,1067 @@ property p; accept_on(a) reject_on(b) p1; endproperty
 
 终止条件可能包含采样值函数（见 16.9.3）。当终止条件中使用除 `$sampled` 之外的采样值函数时，应明确指定时钟参数。终止条件不得包含任何局部变量和序列方法 triggered 和 matched 的引用。
 
+### 16.12.15 弱和强运算符
+属性运算符 `s_nexttime`、`s_always`、`s_eventually`、`s_until`、`s_until_with` 和序列运算符 `strong` 是强运算符：它们要求未来发生某种终止条件，这包括要求时钟节拍足够的时间以使终止条件发生。
+
+属性运算符 n`exttime`、`always`、`until`、`eventually`、`until_with` 和序列运算符 `weak` 是弱运算符：它们不对终止条件施加任何要求，并且不要求时钟节拍。
+
+弱和强运算符的概念与安全属性的重要概念密切相关。安全属性具有所有失败发生在有限时间的特征。例如，属性 `always` a 是安全属性，因为只有在有限时间内发生所有失败，即使计算中有无限多个时钟节拍。相反，属性 `s_eventually` a 在计算中有无限多个时钟节拍时无法在有限时间内识别其失败；如果违反，a 的值必须在无限多个时钟节拍中的每个时钟节拍上为 false。
+
+### 16.12.16 Case
+*case* 属性语句是一个多路决策，测试一个布尔表达式是否与另一些布尔表达式中的一个匹配，并相应地分支（见语法 16-19）。
+---
+```verilog
+property_expr ::= // from A.2.10
+... 
+| case ( expression_or_dist ) property_case_item { property_case_item } endcase
+... 
+property_case_item::= 
+expression_or_dist { , expression_or_dist } : property_expr [ ; ] 
+| default [ : ] property_expr [ ; ] 
+```
+---
+语法 16-19—属性语句 case 语法（摘自附录 A）
+
+*default* 语句是可选的。在一个属性 case 语句中使用多个默认语句是非法的。
+
+使用 case 属性语句的一个简单示例是解码变量延迟以产生两个信号检查之间的延迟，如下所示：
+```verilog
+property p_delay(logic [1:0] delay);
+    case (delay)
+        2'd0 : a && b;
+        2'd1 : a ##2 b;
+        2'd2 : a ##4 b;
+        2'd3 : a ##8 b;
+        default: 0; // 如果 delay 具有 x 或 z 值，则导致失败
+    endcase
+endproperty
+```
+
+在线性搜索期间，如果一个 case 项表达式与括号中给定的 case 表达式匹配，则将评估与该 case 项关联的属性语句，并且线性搜索将终止。如果存在默认 case 项，则在此线性搜索期间将忽略它。如果所有比较失败并且给出了默认项，则将执行默认项属性语句。如果未给出默认属性语句并且所有比较失败，则不会评估任何 case 项属性语句，并且从该起始点评估 case 属性语句成功并返回 true（虚假）。
+
+比较 case 表达式与 case 项表达式的规则在 12.5 中描述。
+
+### 16.12.17 递归属性
+SystemVerilog 允许递归属性。如果命名属性的声明涉及自身的实例化，则该属性是递归的。递归提供了一个灵活的框架，用于编码属性以作为持续的假设、义务或覆盖监视器。
+
+例如：
+```verilog
+property prop_always(p);
+    p and (1'b1 |=> prop_always(p));
+endproperty
+```
+
+是一个递归属性，表示形式参数属性 p 必须在每个周期中保持。如果在序列 s 中编码的复杂触发条件之后，属性 p 必须在每个周期中保持，则此示例很有用：
+```verilog
+property p1(s,p);
+    s |=> prop_always(p);
+endproperty
+```
+
+另一个例子，递归属性
+```verilog
+property prop_weak_until(p,q);
+    q or (p and (1'b1 |=> prop_weak_until(p,q)));
+endproperty
+```
+
+表示形式参数属性 p 必须在每个周期中保持，直到但不包括第一个形式参数属性 q 为 true 的第一个周期。但是，形式参数属性 q 不需要保持。如果 p 必须在序列 s 中编码的复杂触发条件之后的每个周期中保持，但是 p 的要求被 q 解除，则此示例很有用：
+```verilog
+property p2(s,p,q);
+    s |=> prop_weak_until(p,q);
+endproperty
+```
+
+更一般地说，几个属性可以相互递归。例如：
+```verilog
+property check_phase1;
+    s1 |-> (phase1_prop and (1'b1 |=> check_phase2));
+endproperty
+
+property check_phase2;
+    s2 |-> (phase2_prop and (1'b1 |=> check_phase1));
+endproperty
+```
+
+对递归属性声明有四个限制，如下所示：
+ - 限制 1：否定运算符 `not` 和强运算符 `s_nexttime`、`s_eventually`、`s_always`、`s_until` 和 `s_until_with` 不能应用于实例化递归属性的任何属性表达式。特别地，不能断言递归属性的否定或用于定义另一个属性。
+
+   以下是违反限制 1 的非法属性声明示例：
+   ```verilog
+   property illegal_recursion_1(p);
+       not prop_always(not p);
+   endproperty
+
+   property illegal_recursion_2(p);
+       p and (1'b1 |=> not illegal_recursion_2(p));
+   endproperty
+   ```
+
+   此外，`not` 不能应用于实例化依赖于递归属性的属性的任何属性表达式。依赖性的精确定义在 F.7 中给出。
+
+ - 限制 2：运算符 `disable iff` 不能在递归属性的声明中使用。这一限制与禁用 `disable iff` 嵌套一致。
+
+   以下是违反限制 2 的非法属性声明示例：
+   ```verilog
+   property illegal_recursion_3(p);
+       disable iff (b)
+       p and (1'b1 |=> illegal_recursion_3(p));
+   endproperty
+   ```
+
+   属性 illegal_recursion_3 的意图可以合法地写成如下形式：
+   ```verilog
+   property legal_3(p);
+       disable iff (b) prop_always(p);
+   endproperty
+   ```
+
+   因为 legal_3 不是递归属性。
+
+ - 限制 3：如果 p 是递归属性，则在 p 的声明中，p 的每个递归实例必须在时间上有正向的进展。在相互递归属性的情况下，所有递归实例必须在时间上有正向的进展。
+
+   以下是违反限制 3 的非法属性声明示例：
+   ```verilog
+   property illegal_recursion_4(p);
+       p and (1'b1 |-> illegal_recursion_4(p));
+   endproperty
+   ```
+
+   如果这种形式是合法的，递归将被困在时间中，一遍又一遍地检查 p。
+
+ - 限制 4：对于属性 p 中递归实例 q，每个实例的实际参数表达式 e 都满足以下条件之一：
+   - e 本身是 p 的形式参数。
+   - p 的形式参数不出现在 e 中。
+   - e 绑定到 q 的局部变量形式参数。
+
+   例如：
+   ```verilog
+   property fibonacci1 (local input int a, b, n, int fib_sig);
+       (n > 0)
+       |-> 
+       (
+           (fib_sig == a)
+           and
+           (1'b1 |=> fibonacci1(b, a + b, n - 1, fib_sig))
+       );
+   endproperty
+   ```
+
+   是一个合法声明，但是
+   ```verilog
+   property fibonacci2 (int a, b, n, fib_sig);
+       (n > 0)
+       |-> 
+       (
+           (fib_sig == a)
+           and
+           (1'b1 |=> fibonacci2(b, a + b, n - 1, fib_sig))
+       );
+   endproperty
+   ```
+
+   是非法的，因为在递归实例 `fibonacci2(b, a+b, n-1, fib_sig)` 中，实际参数表达式 `a+b`, `n-1` 既不是 fibonacci2 的形式参数，也没有绑定到局部变量形式参数，但是 fibonacci2 的形式参数出现在这些表达式中。
+
+运算符 `accept_on`、`reject_on`、`sync_accept_on` 和 `sync_reject_on` 可以在递归属性中使用。例如，属性中对 accept_on 和 reject_on 的以下用法是合法的：
+```verilog
+property p3(p, bit b, abort);
+    (p and (1'b1 |=> p4(p, b, abort)));
+endproperty
+
+property p4(p, bit b, abort);
+    accept_on(b) reject_on(abort) p3(p, b, abort);
+endproperty
+```
+
+递归属性可以表示复杂的要求，例如那些与不同数量的数据节拍相关、乱序完成的、重试的，等等。下面是使用递归属性检查这种类型的复杂条件的例子。
+
+假设写数据必须根据以下条件进行检查：
+ - 写请求的确认由信号 write_request 和 write_request_ack 表示。当写请求被确认时，它会得到一个 4 位标签，由信号 write_request_ack_tag 表示。标签用于区分多个同时进行的写事务的数据节拍。
+ - 可以理解，同时进行的不同写事务必须具有不同的标签。为简单起见，此条件不是本示例中检查的一部分。
+ - 每个写事务可以有 1 个数据节拍到 16 个数据节拍，每个数据节拍为 8 位。有一个可用于确认写请求的预期写数据模型。模型是一个 128 位向量。最高位的 8 位表示第一个节拍的预期数据，接下来的 8 位表示第二节拍的预期数据（如果有第二节拍），依此类推。
+ - 写事务的数据传输发生在写请求被确认后，并且除非重试，否则在最后一个数据节拍后结束。单个写事务的数据节拍按顺序发生。
+ - 数据节拍由 data_valid 信号和 data_valid_tag 信号表示以确定相关的写事务。带 data_valid 的信号数据是有效的，并携带该节拍的数据。每拍的数据必须根据预期写数据模型是正确的。
+ - 最后一个数据节拍由信号 last_data_valid 和 data_valid 以及 data_valid_tag 表示。为简单起见，本示例不表示数据节拍的数量，并且不检查 last_data_valid 是否在正确的节拍上。
+ - 在确认写请求后的任何时间，但不迟于最后一个数据节拍的下一个周期，可以强制写事务重试。重试由信号 retry 和 retry_tag 表示以标识相关的写事务。如果强制写事务重试，则其当前数据传输被中止，并且整个数据传输必须重复。事务不会重新请求，并且其标签不会更改。
+ - 对写事务强制重试的次数没有限制。
+ - 除非在该周期中强制写事务重试，否则写事务在最后一个数据节拍的下一个周期完成。
+
+以下是用于检查这些条件的代码：
+```verilog
+property check_write;
+    logic [0:127] expected_data; // 用于采样模型数据的本地变量
+    logic [3:0] tag; // 用于采样标签的本地变量
+    disable iff (reset)
+    (
+        write_request && write_request_ack, 
+        expected_data = model_data,
+        tag = write_request_ack_tag
+    )
+    |=> 
+    check_write_data_beat(expected_data, tag, 4'h0);
+endproperty
+
+property check_write_data_beat
+(
+    local input logic [0:127] expected_data, 
+    local input logic [3:0] tag, i 
+);
+    (
+        (data_valid && (data_valid_tag == tag))
+        ||
+        (retry && (retry_tag == tag))
+    )[->1]
+    |->
+    (
+        (
+            (data_valid && (data_valid_tag == tag)) 
+            |-> 
+            (data == expected_data[i*8+:8])
+        )
+        and
+        (
+            if (retry && (retry_tag == tag))
+            (
+                1'b1 |=> check_write_data_beat(expected_data, tag, 4'h0)
+            )
+            else if (!last_data_valid)
+            (
+                1'b1 |=> check_write_data_beat(expected_data, tag, i+4'h1)
+            )
+            else
+            ( 
+                ##1 (retry && (retry_tag == tag))
+                |=>
+                check_write_data_beat(expected_data, tag, 4'h0)
+            )
+        )
+    );
+endproperty
+```
+
+### 16.12.18 属性声明中的类型化形式参数
+16.8.1 中的类型化形式参数及其对应的实际参数的规则适用于命名属性，除非另有说明。
+
+如果命名属性的形式参数是类型化的，则类型必须是 `property`、`sequence`、`event` 或 16.6 中允许的类型之一。如果形式参数的类型是 `property`，则相应的实际参数必须是 property_expr，并且对形式参数的每个引用都必须在可以写入 property_expr 的位置上。
+
+例如，布尔表达式或 sequence_expr 可以作为 `property` 类型形式参数的实际参数传递，因为每个都是 property_expr。无论相应的实际参数如何，都不能将类型为 `property` 的形式参数引用为 `|->` 或 `|=>` （见 16.12.6）的前提条件，因为不能在该位置写入 property_expr。
+
+### 16.12.19 属性声明中的局部变量形式参数
+16.8.2 中的局部变量形式参数及其对应的实际参数的规则适用于命名属性，除非另有说明。
+
+命名属性的局部变量形式参数必须具有 `input` 方向，可以显式指定或推断。不得声明具有 `inout` 或 `output` 方向的命名属性的局部变量形式参数。
+
+### 16.12.20 属性示例
+以下示例说明了属性形式：
+```verilog
+property rule1;
+    @(posedge clk) a |-> b ##1 c ##1 d;
+endproperty
+
+property rule2;
+    @(clkev) disable iff (e) a |-> not(b ##1 c ##1 d);
+endproperty
+```
+
+属性 rule2 在蕴含的结论中否定了序列 `(b ##1 c ##1 d)`。clkev 指定了属性的时钟。
+
+```verilog
+property rule3;
+    @(posedge clk) a[*2] |-> ((##[1:3] c) or (d |=> e));
+endproperty
+```
+
+属性 rule3 表示如果 a 保持，并且 a 也在上一个周期保持，则 c 必须在当前周期之后的一个到三个周期中的某个周期保持，或者如果 d 在当前周期保持，则 e 必须在一个周期后保持。
+
+```verilog
+property rule4;
+    @(posedge clk) a[*2] |-> ((##[1:3] c) and (d |=> e));
+endproperty
+```
+
+属性 rule4 表示如果 a 保持，并且 a 也在上一个周期保持，则 c 必须在当前周期之后的一个到三个周期中的某个周期保持，并且如果 d 在当前周期保持，则 e 必须在一个周期后保持。
+
+```verilog
+property rule5;
+    @(posedge clk) 
+    a ##1 (b || c)[->1] |-> 
+    if (b) 
+        (##1 d |-> e)
+    else // c
+        f ;
+endproperty
+```
+
+属性 rule5 的前提是 a 后跟下一个出现的 b 或 c。结论使用 `if-else` 分割在哪个 b 或 c 首先匹配上的情况。
+
+```verilog
+property rule6(x,y);
+    ##1 x |-> y;
+endproperty
+
+property rule5a;
+    @(posedge clk) 
+    a ##1 (b || c)[->1] |-> 
+    if (b) 
+        rule6(d,e)
+    else // c
+        f ;
+endproperty
+```
+
+属性 rule5a 等效于 rule5，但是它使用 rule6 的一个实例作为属性表达式。
+
+属性可以选择为时钟指定事件控制。时钟推导和解析规则在 16.16 中描述。
+
+可以通过引用其名称来实例化命名属性。可以使用分层名称，与 SystemVerilog 命名约定一致。就像序列声明，使用在序列中的不是形式参数的变量是从声明属性的作用域中层次解析的。
+
+使用多个时钟的属性在 16.13 中描述。
+
+### 16.12.21 有限长度与无限长度行为
+F.5 中的形式语义定义了给定属性在给定行为上是否成立。该评估的结果如何与取决于分析的行为的设计相关。在动态验证中，只考虑有限长度的行为。在这种情况下，SystemVerilog 定义了以下四个属性满足级别：
+ - 强满足
+   - 没有看到坏状态。
+   - 所有未来义务已经满足。
+   - 该属性将在路径的任何扩展上成立。
+ - 满足（但不强制）
+   - 没有看到坏状态。
+   - 所有未来义务已经满足。
+   - 该属性可能在给定路径的扩展上成立或不成立。
+ - 待定
+   - 没有看到坏状态。
+   - 未来义务未被满足。
+   - 该属性可能在给定路径的扩展上成立或不成立。
+ - 失败
+   - 看到了坏状态。
+   - 未来义务可能已经满足或未满足。
+   - 该属性将不会在路径的任何扩展上成立。
+
+### 16.12.22 非退化性
+可以定义永远无法匹配的序列。例如：
+```verilog
+(1'b1) intersect(1'b1 ##1 1'b1)
+```
+
+也可以定义只允许空匹配的序列。例如：
+```verilog
+1'b1[*0]
+```
+
+允许任何匹配或只允许空匹配的序列称为 *退化的*。允许至少一个非空匹配的序列称为 *非退化的*。非退化性的更精确定义在 F.5.2 和 F.5.5 中给出。
+
+以下限制适用：
+ - 用作属性的序列必须是非退化的，并且不得允许任何空匹配。
+ - 用作重叠蕴含（`|->`）的前提条件的序列必须是非退化的。
+ - 用作非重叠蕴含（`|=>`）的前提条件的序列必须允许至少一个匹配。这样的序列可能只允许空匹配。
+
+这些限制的原因是退化序列的非法使用方式会导致反直觉的属性语义，特别是当属性与禁用 `iff` 子句组合时。
+
+## 16.13 多时钟支持
+多时钟序列和属性可以按照以下章节中描述的方式指定。
+
+### 16.13.1 多时钟序列
+多时钟序列是通过使用单时钟延迟连接运算符 `##1` 或零时钟延迟连接运算符 `##0` 连接单时钟子序列而构建的。`##1` 指示的单个延迟是从第一个序列的结束点（发生在第一个时钟的节拍）到第二个时钟的最近的严格后续节拍，第二个序列开始的地方。`##0` 指示的零延迟是从第一个序列的结束点（发生在第一个时钟的节拍）到第二个时钟的最近可能重叠节拍，第二个序列开始的地方。
+
+例1：
+```verilog
+@(posedge clk0) sig0 ##1 @(posedge clk1) sig1
+```
+
+此序列的匹配从 `posedge` clk0 处的 sig0 的匹配开始。然后 `##1` 将时间移动到最近的严格后续 `posedge` clk1，该序列在该点以 sig1 的匹配结束。如果 clk0 和 clk1 不相同，则序列的时钟事件在 `##1` 之后发生变化。如果 clk0 和 clk1 相同，则时钟事件在 `##1` 之后不发生变化，上述序列等效于单时钟序列：
+```verilog
+@(posedge clk0) sig0 ##1 sig1
+```
+
+例2：
+```verilog
+@(posedge clk0) sig0 ##0 @(posedge clk1) sig1
+```
+
+此序列的匹配从 `posedge` clk0 处的 sig0 的匹配开始。然后 `##0` 将时间移动到最近可能重叠的 `posedge` clk1，该序列在该点以 sig1 的匹配结束：如果 `posedge` clk0 和 `posedge` clk1 同时发生，则时间不会在 `##0` 上移动，否则，它的行为类似于 `##1`。如果 clk0 和 clk1 不相同，则序列的时钟事件在 `##0` 之后发生变化。如果 clk0 和 clk1 相同，则时钟事件在 `##0` 之后不发生变化，上述序列等效于以下单时钟序列：
+```verilog
+@(posedge clk0) sig0 ##0 sig1
+```
+
+和下面的等效：
+```verilog
+@(posedge clk0) sig0 && sig1
+```
+
+当连接不同时钟的序列时，要求最大的单时钟子序列只能接受非空匹配。*最大单时钟子序列* 是指从应用重写算法 F.4 后产生的多时钟序列中出现的最大单时钟序列。这样的序列不能通过吸收任何周围的运算符及其参数而扩大，而不将单时钟序列更改为多时钟序列或属性。
+
+因此，如果 s1、s2 是没有时钟事件的序列表达式，则以下多时钟序列：
+```verilog
+@(posedge clk1) s1 ##1 @(posedge clk2) s2
+```
+
+只有当 s1 和 s2 都不能匹配空字时，才是合法的。时钟事件 `@(posedge clk1)` 适用于 s1 的整个匹配，而时钟事件 `@(posedge clk2)` 适用于 s2 的整个匹配。因为 s1 的匹配是非空的，所以在 `##1` 之后有一个 s1 的结束点。`##1` 在这个结束点和严格在其后的第一个 `posedge clk2` 之间同步。`posedge clk2` 的这个发生是 s2 的匹配的开始点。
+
+多时钟序列具有明确定义的起始和结束时钟事件以及由于最大单时钟子序列不能匹配空字而产生的明确定义的时钟更改。如果 clk1 和 clk2 不相同，则序列：
+```verilog
+@(posedge clk0) sig0 ##1 @(posedge clk1) sig1[*0:1]
+```
+
+是非法的，因为 `sig1[*0:1]` 可能匹配空字，这将使得结束时钟事件是 `@(posedge clk0)` 还是 `@(posedge clk1)` 是模棱两可的。
+
+不同时钟或多时钟序列操作数不能与除 `##1` 和 `##0` 之外的任何序列运算符组合。例如，如果 clk1 和 clk2 不相同，则以下是非法的：
+```verilog
+@(posedge clk1) s1 ##2 @(posedge clk2) s2
+@(posedge clk1) s1 intersect @(posedge clk2) s2
+```
+
+### 16.13.2 多时钟属性
+时钟可以明确指定为任何属性。如果属性的某些子属性具有与属性时钟不同的时钟，或者某些子属性是多时钟序列，则该属性是多时钟属性。
+
+与单时钟属性一样，多时钟属性的评估结果是 true 或 false。多时钟序列本身是多时钟属性。例如：
+```verilog
+@(posedge clk0) sig0 ##1 @(posedge clk1) sig1
+```
+
+是一个多时钟属性。如果多时钟序列作为属性从某一点开始评估，则该计算返回真，当且仅当该点开始的地方有一个多时钟序列的匹配。
+
+以下示例显示了如何使用布尔属性运算符形成多时钟属性：
+```verilog
+(@(posedge clk0) sig0) and (@(posedge clk1) sig1)
+```
+
+这是一个多时钟属性，但它不是多时钟序列。该属性在某一点评估为真，当且仅当两个序列：
+```verilog
+@(posedge clk0) sig0
+```
+
+和
+```verilog
+@(posedge clk1) sig1
+```
+
+都有匹配开始于该点。
+
+多时钟非重叠蕴含的含义类似于单时钟非重叠蕴含。例如，如果 s0 和 s1 是没有时钟事件的序列，则在
+```verilog
+@(posedge clk0) s0 |=> @(posedge clk1) s1
+```
+
+中，`|=>` 在 `posedge` clk0 和 `posedge` clk1 之间同步。从评估点开始，对于时钟为 clk0 的 s0 的每个匹配，时间从匹配的结束点向前推进到最近的严格未来出现的 posedge clk1，从那里必须存在 s1 的匹配。
+
+下面的例子展示了如何使用重叠蕴含和布尔属性运算符形成不同时钟属性组合：
+```verilog
+@(posedge clk0) s0 |-> (@(posedge clk1) s1) and (@(posedge clk2) s2)
+```
+
+多时钟重叠蕴含 `|->` 的含义如下：在前提条件的结束点，等待确认后续时钟的最近节拍。如果后续时钟在前提条件的结束点发生，则立即开始检查后续条件。否则，多时钟重叠蕴含的含义与多时钟非重叠蕴含的含义相同。
+
+例如，如果 s0 和 s1 是没有时钟事件的序列，则
+```verilog
+@(posedge clk0) s0 |-> @(posedge clk1) s1
+```
+
+的含义是：在 s0 的每个匹配的结束点，等待最近的 `posedge` clk1。如果它立即发生，则立即开始检查 s1。否则，它的检查在下一个 `posedge` clk1 开始，就像在 `|=>` 的情况下一样。两种情况下，s1 的评估受 `posedge` clk1 控制。
+
+多时钟 if/if-else 运算符的语义类似于多时钟重叠蕴含的语义。例如，如果 s1 和 s2 是没有时钟事件的序列，则
+```verilog
+@(posedge clk0) if (b) @(posedge clk1) s1 else @(posedge clk2) s2
+```
+
+的含义是：在 `posedge` clk0 处检查条件 b。如果 b 为真，则在最近检查 s1，可能和 `posedge` clk1 重叠，否则在最近检查 s2，不严格地在 `posedge` clk2 之后。
+
+### 16.13.3 时钟流
+在本节中，c 和 d 表示时钟事件表达式，v、w、x、y 和 z 表示没有时钟事件的序列。
+
+时钟流允许时钟事件的范围在多时钟序列和属性的各个部分中自然地扩展，并减少必须在其中指定相同时钟事件的地方的数量。
+
+直观地说，时钟流提供了：在多时钟序列和属性中，时钟事件的范围通过线性运算符（例如，重复、连接、否定、蕴含、后跟和 `nexttime`、`always`、`eventually` 运算符）从左到右流动并分配给分支运算符（例如，和，或，交，`if-else` 和 `until` 运算符）的操作数，直到被新的时钟事件替换。
+
+例如：
+```verilog
+@(c) x |=> @(c) y ##1 @(d) z
+```
+
+可以更简单地写成
+```verilog
+@(c) x |=> y ##1 @(d) z
+```
+
+因为时钟 c 被理解为流过 `|=>`。
+
+时钟流还使得连接和蕴含之间的伴随关系对于多时钟属性变得清晰：
+```verilog
+@(c) x ##1 y |=> @(d) z
+```
+
+等效于
+```verilog
+@(c) x |=> y |=> @(d) z
+```
+
+和
+```verilog
+@(c) x ##0 y |=> @(d) z
+```
+
+等效于
+```verilog
+@(c) x |-> y |=> @(d) z
+```
+
+时钟事件的范围流入括号化子表达式，并且，如果子表达式是序列，则还会从左到右流过括号化子表达式。但是，时钟事件的范围不会流出包围括号。
+
+例如，在以下情况中：
+```verilog
+@(c) w ##1 (x ##1 @(d) y) |=> z
+```
+
+w、x 和 z 在 c 时钟下，y 在 d 时钟下。时钟 c 在 `##1`、括号化子序列 `(x ##1 @(d) y)` 和 `|=>` 中流动。时钟 c 也流入括号化子序列，但不会流过 `@(d)`。时钟 d 不会流出其包围括号。
+
+作为另一个例子，在以下情况中：
+```verilog
+@(c) v |=> (w ##1 @(d) x) and (y ##1 z)
+```
+
+v、w、y 和 z 在 c 时钟下，x 在 d 时钟下。时钟 c 在 `|=>` 中流动，分配给 `and` 的两个操作数（由于多时钟的多重性，这是一个属性的合取），流入每个括号化子表达式。在 `(w ##1 @(d) x)` 中，c 在 `##1` 中流动，但不会流过 `@(d)`。时钟 d 不会流出其包围括号。在 `(y ##1 z)` 中，c 在 `##1` 中流动。
+
+类似地，时钟事件的范围流入命名属性或序列的实例，无论是应用方法 triggered 还是方法 matched。时钟事件的范围从左到右流过属性或序列的实例。属性或序列的声明中的时钟事件不会流出该属性或序列的实例。
+
+时钟事件的范围不会流入 `disable iff` 的禁用条件。
+
+并列两个时钟事件会使第一个时钟事件无效；因此，以下两个时钟事件语句：
+```verilog
+@(d) @(c) x
+```
+
+等效于以下内容：
+```verilog
+@(c) x
+```
+
+因为时钟 d 的流立即被时钟 c 覆盖。
+
+### 16.13.4 示例
+以下是多时钟规范的示例：
+```verilog
+sequence s1;
+    a ##1 b; // 无时钟序列
+endsequence
+
+sequence s2;
+    c ##1 d; // 无时钟序列
+endsequence
+```
+
+ - `a)` 多时钟序列
+   ```verilog
+   sequence mult_s;
+        @(posedge clk) a ##1 @(posedge clk1) s1 ##1 @(posedge clk2) s2;
+   endsequence
+   ```
+ - `b)` 具有多时钟序列的属性
+   ```verilog
+   property mult_p1;
+         @(posedge clk) a ##1 @(posedge clk1) s1 ##1 @(posedge clk2) s2;
+   endproperty
+   ```
+
+ - `c)` 具有命名多时钟序列的属性
+   ```verilog
+   property mult_p2;
+       mult_s;
+   endproperty
+   ```
+
+ - `d)` 具有多时钟蕴含的属性
+   ```verilog
+   property mult_p3;
+       @(posedge clk) a ##1 @(posedge clk1) s1 |=> @(posedge clk2) s2;
+   endproperty
+   ```
+
+ - `e)` 具有命名多时钟序列的蕴含的属性
+   ```verilog
+   property mult_p6;
+        mult_s |=> mult_s;
+   endproperty
+   ```
+
+ - `f)` 使用时钟流和重叠蕴含的属性
+   ```verilog
+   property mult_p7;
+       @(posedge clk) a ##1 b |-> c ##1 @(posedge clk1) d;
+   endproperty
+   ```
+   这里，a、b 和 c 在 `posedge` clk 获得时钟。
+
+ - `g)` 使用时钟流和 if-else 的属性
+   ```verilog
+   property mult_p8;
+       @(posedge clk) a ##1 b |-> 
+       if (c) 
+           (1 |=> @(posedge clk1) d)
+       else
+           e ##1 @(posedge clk2) f ;
+   endproperty
+   ```
+   这里，a、b、c、e 和常数 1 在 `posedge` clk 获得时钟。
+
+### 16.13.5 检测和使用多时钟上的序列的结束点
+方法 triggered 可以应用于检测多时钟序列的结束点。方法 triggered 也可以应用于从多时钟序列内部检测序列的结束点。在这两种情况下，应用 triggered 的序列实例的结束时钟应与出现 triggered 的上下文中的时钟相同。
+
+要检测序列的结束点，当源序列的时钟与目标序列的时钟不同时，使用源序列上的 matched 方法。只要有匹配，序列的结束点就会到达。
+
+要检测结束点，可以应用 matched 方法于命名序列实例，带或不带参数，一个未类型化的形式参数，或一个 `sequence` 类型的形式参数，如下所示：
+```verilog
+sequence_instance.matched
+```
+
+或
+```verilog
+formal_argument_sequence.matched
+```
+
+matched 是一个在序列上的方法，返回 true（1'b1）或 false（1'b0）。与 triggered 不同，matched 使用两个时钟之间的同步，通过存储源序列匹配的结果，直到目标时钟节拍到达后才返回。matched 的结果不取决于源序列的起始点。
+
+与 triggered 一样，matched 可以应用于具有形式参数的序列。如下所示：
+```verilog
+sequence e1(a,b,c);
+    @(posedge clk) $rose(a) ##1 b ##1 c
+endsequence
+
+sequence e2;
+    @(posedge sysclk) reset ##1 inst ##1 e1(ready,proc1,proc2).matched [->1] 
+        ##1 branch_back;
+endsequence
+```
+
+在这个例子中，源序列 e1 在时钟 clk 上评估，而目标序列 e2 在时钟 sysclk 上评估。在 e2 中，检测 `e1(ready,proc1,proc2)` 实例的结束点，该结束点在 inst 发生后的某个时间。注意，matched 方法仅测试 `e1(ready,proc1,proc2)` 的结束点，并且与 `e1(ready,proc1,proc2)` 的起始点无关。
+
+可以将本地变量传递到应用 matched 的命名序列实例中。与 triggered 的限制一样。在应用 matched 的命名序列实例中采样的本地变量的值将在与 triggered 相同的条件下流出。参见 16.10。
+
+与 triggered 一样，应用 matched 的序列实例可以在目标序列时钟的单个周期中具有多个匹配。多个匹配在语义上与匹配 `or` 的两个分支相同。换句话说，评估目标序列的线程将分叉以考虑这样的不同的本地变量赋值。
+
+### 16.13.6 序列方法
+方法 triggered 和 matched 可用于识别序列的结束点。操作数 `sequence` 必须是一个命名序列实例，带或不带参数，一个未类型化的形式参数，或一个 `sequence` 类型的形式参数，在这些参数合法的上下文中。这些方法使用以下语法调用：
+```verilog
+sequence_instance.sequence_method
+```
+
+或
+```verilog
+formal_argument_sequence.sequence_method
+```
+
+这些操作的结果是 true（1'b1）或 false（1'b0），不取决于其操作数的匹配起点。这些方法可以在具有形式参数的序列上调用。这些方法的采样值定义为当前值（参见 16.5.1）。
+
+方法 triggered 的值在特定时间点评估时，如果操作数序列在该特定时间点达到其结束点，则为 true（1'b1），否则为 false（1'b0）。序列的触发状态在 Observed 区域中设置，并在时间步骤的其余部分持续。除了在断言语句中使用此方法之外，还可以在 `wait` 语句（参见 9.4.4）或序列上下文之外的布尔表达式中使用。在序列上下文之外的序列上调用此方法是错误的，这些序列将其形式参数视为本地变量。如果形参在 operator_assignment 中用作左值，或在 sequence_match_item 中用作 inc_or_dec_expression，则序列会将其形参视为局部变量。使用 triggered 的序列之间不应存在循环依赖关系。
+
+方法 matched 用于检测多时钟序列中引用的一个序列（源序列）的结束点。它只能在序列表达式中使用。与 triggered 不同，matched 通过存储源序列的结果来提供两个时钟之间的同步，直到匹配后的第一个时钟节拍到达。序列的匹配状态在 Observed 区域中设置，并在匹配后的第一个时钟节拍到达后的 Observed 区域中持续。
+
+在采样值函数（参见 16.9.3）中使用 matched 方法被认为是错误的。
+
+序列中使用上述方法的示例如下：
+```verilog
+sequence e1;
+    @(posedge sysclk) $rose(a) ##1 b ##1 c;
+endsequence
+
+sequence e2;
+    @(posedge sysclk) reset ##1 inst ##1 e1.triggered ##1 branch_back;
+endsequence
+
+sequence e3;
+    @(posedge clk) reset1 ##1 e1.matched ##1 branch_back1;
+endsequence
+
+sequence e2_with_arg(sequence subseq);
+    @(posedge sysclk) reset ##1 inst ##1 subseq.triggered ##1 branch_back;
+endsequence
+
+sequence e4;
+    e2_with_arg(@(posedge sysclk) $rose(a) ##1 b ##1 c);
+endsequence
+
+program check;
+    initial begin
+        wait (e1.triggered || e2.triggered);
+        if (e1.triggered)
+            $display("e1 passed");
+        if (e2.triggered)
+            $display("e2 passed");
+        L2: ...
+    end
+endprogram
+```
+
+在上述示例中，序列 e2 使用方法 triggered 检测序列 e1 的结束点，因为两个序列使用同一时钟。序列 e3 使用方法 matched 检测序列 e1 的结束点，因为 e1 和 e3 使用不同的时钟。序列 e4 是与 e2 等效的序列，显示了在形式参数类型为 `sequence` 的序列上应用方法 triggered 的应用。程序中的 `initial` 过程等待 e1 或 e2 的结束点。当 e1 或 e2 评估为 true 时，等待语句解除阻塞初始过程。然后，该过程显示导致其解除阻塞的序列，并继续执行标记为 L2 的语句。
+
+应用方法的序列的操作数必须是有时钟的，或者从上下文中推断时钟。16.9.3 中说明的用于给采样值函数推断时钟事件的规则同样适用。
+
+如果为序列的形式参数指定了默认实际参数 `$inferred_clock`，并且未为序列实例提供实际参数，则将使用 16.9.3 中指定的相同规则来确定绑定到该形式参数的推断时钟事件表达式。
+
+如果带有方法的序列作为检查器实例的实际参数传递，则它将替换相应的形式参数。这样的序列必须被视为在检查器内部实例化。
+
+如果带有方法的序列连接到模块实例的端口，则它带有时钟，就像在模块实例化的地方实例化一样。如果带有方法的序列连接到接口或程序实例化的端口，或作为函数或任务调用的实际参数传递，则适用相同的规则。
+
+用于推断时钟事件的规则也适用于在事件表达式中实例化的序列。
+
+以下示例说明了在应用方法时序列如何推断时钟：
+```verilog
+module mod_sva_checks; 
+    logic a, b, c, d; 
+    logic clk_a, clk_d, clk_e1, clk_e2;
+    logic clk_c, clk_p; 
+
+    clocking cb_prog @(posedge clk_p); endclocking
+    clocking cb_checker @(posedge clk_c); endclocking
+
+    default clocking cb @(posedge clk_d); endclocking
+
+    sequence e4;
+        $rose(b) ##1 c;
+    endsequence
+
+    // e4 推断 posedge clk_a，根据时钟流规则
+    a1: assert property (@(posedge clk_a) a |=> e4.triggered);
+
+    sequence e5;
+        // e4 将推断 posedge clk_e1，根据时钟流规则，无论 e5 实例化时是否使用方法
+        @(posedge clk_e1) a ##[1:3] e4.triggered ##1 c;
+    endsequence
+
+    // e4, 在 e5 中使用，从 e5 推断 posedge clk_e1
+    a2: assert property (@(posedge clk_a) a |=> e5.matched);
+
+    sequence e6(f);
+        @(posedge clk_e2) f;
+    endsequence
+
+    // e4 推断 posedge clk_e2，根据时钟流规则
+    a3: assert property (@(posedge clk_a) a |=> e6(e4.triggered));
+
+    sequence e7;
+        e4 ##1 e6(d);
+    endsequence
+
+    // e7 的主时钟是 posedge clk_a，根据时钟流规则
+    a4: assert property (@(posedge clk_a) a |=> e7.triggered);
+
+    // 在禁用条件中的非法使用，e4 没有明确时钟
+    a5_illegal: assert property ( 
+        @(posedge clk_a) disable iff (e4.triggered) a |=> b); 
+
+    always @(posedge clk_a) begin
+        // e4 推断默认时钟 cb 而不是 posedge clk_a，因为此过程中有多个事件控制 (16.14.6)
+        @(e4);
+        d = a;
+    end
+
+    program prog_e4;
+        default clocking cb_prog;
+        initial begin
+            // e4 推断默认时钟 cb_prog
+            wait (e4.triggered);
+            $display("e4 passed");
+        end
+    endprogram : prog_e4
+
+    checker check(input in1, input sequence s_f);
+        default clocking cb_checker;
+        always @(s_f)
+            $display("sequence triggered"); 
+        a4: assert property (a |=> in1);
+    endchecker : check
+
+    // e4 推断检查器的默认时钟 cb_checker
+    check c1(e4.triggered, e4);
+
+    // e4 连接到模块实例的端口推断默认时钟 cb
+    mod_adder ai1(e4.triggered);
+
+endmodule : mod_sva_checks
+```
+
+关于序列方法的更多细节可以在 9.4.4、16.9.11 和 16.13.5 中找到。
+
+### 16.13.7 局部变量初始化赋值
+对于单时钟序列和属性，当评估尝试开始时，将执行命名序列或属性实例的评估尝试的局部变量初始化赋值。这样的评估尝试始终在单个统治时钟的节拍中开始。
+
+对于多时钟序列和属性，尝试用一个语义前导时钟（见16.16.1）对一个命名序列或属性的实例求值时，局部变量的初始化赋值应该在语义前导时钟的最早时刻执行，即在求值尝试开始时或之后。如果一个命名属性的实例有两个或两个以上不同的语义前导时钟，那么应该为每个语义前导时钟创建一个局部变量的单独副本。对于局部变量的每一个副本，在尝试求值开始时或之后对应语义先行时钟的最早时刻进行初始化赋值，并在与相应语义先行时钟相关联的子属性求值时对局部变量应使用的副本进行初始化赋值。
+
+例如，让
+```verilog
+property p;
+    logic v = e;
+    (@(posedge clk1) (a == v)[*1:$] |-> b)
+    and
+    (@(posedge clk2) c[*1:$] |-> d == v)
+    ;
+endproperty
+a1: assert property (@(posedge clk) f |=> p);
+```
+
+其中 f 是类型为 `logic` 的信号。在断言 a1 中的 p 的实例有两个语义前导时钟，`posedge` clk1 和 `posedg` clk2。为这两个由这些时钟控制的子属性的局部变量 v 创建单独的副本。让 t0 是一个时刻，在该时刻发生了 `posedge` clk，并且 f 的采样值为 true。根据 a1 的结构，p 的实例的评估尝试严格在 t0 之后开始。让 t1 是 t0 之后最早的时刻，在该时刻发生了 `posedge` clk1，让 t2 是 t0 之后最早的时刻，在该时刻发生了 `posedge` clk2。然后在 t1 执行声明赋值 `v=e`，并将该值分配给与 `posedge` clk1 相关联的 v 的副本。这个值在子属性 `(a == v)[*1:$] |-> b` 的评估中使用。类似地，在 t2 执行声明赋值 `v=e`，并将该值分配给与 `posedge` clk2 相关联的 v 的副本。这个值在子属性 `c[*1:$] |-> d == v` 的评估中使用。
+
+不使用局部变量声明赋值的 p 的等效声明如下：
+```verilog
+property p;
+    logic v;
+    (@(posedge clk1) (1, v = e) ##0 (a == v)[*1:$] |-> b)
+    and
+    (@(posedge clk2) (1, v = e) ##0 c[*1:$] |-> d == v)
+    ;
+endproperty
+```
+
+## 16.14 并发断言
+一个属性本身永远不会被评估来检查一个表达式。它必须在断言语句（见16.2）中使用才能发生这种情况。
+
+一个并发断言语句可以在以下任何地方指定：
+ - 一个 always 过程或 initial 过程作为语句，无论这些过程在哪里出现（见9.2）
+ - 一个模块
+ - 一个接口
+ - 一个程序
+ - 一个 generate 块
+ - 一个检查器
+
+---
+```verilog
+concurrent_assertion_item ::= // from A.2.10
+[ block_identifier : ] concurrent_assertion_statement 
+... 
+procedural_assertion_statement ::= // from A.6.10
+concurrent_assertion_statement 
+... 
+concurrent_assertion_statement ::= 
+assert_property_statement 
+| assume_property_statement 
+| cover_property_statement 
+| cover_sequence_statement 
+| restrict_property_statement 
+assert_property_statement::= 
+assert property ( property_spec ) action_block 
+assume_property_statement::= 
+assume property ( property_spec ) action_block 
+cover_property_statement::= 
+cover property ( property_spec ) statement_or_null 
+cover_sequence_statement::= 
+cover sequence ( [clocking_event ] [ disable iff ( expression_or_dist ) ] 
+sequence_expr ) statement_or_null 
+restrict_property_statement::= 
+restrict property ( property_spec ) ;
+```
+---
+语法 16-20—并发断言构造语法（摘自附录 A）
+
+使用断言控制系统任务（见20.12）可以控制断言语句的执行。
+
+一个并发断言语句可以通过其可选名称引用。可以使用分层名称，符合 SystemVerilog 命名约定。如果没有提供名称，则工具将为报告目的分配一个名称。
+
+### 16.14.1 断言语句
+`assert` 语句用于强制执行一个 `porperty`。当 `assert` 语句的属性评估为 true 时，执行动作块的 pass 语句。当 `assert` 语句的属性评估为 false 时，执行 action_block 的 fail 语句。当 `assert` 语句的属性评估为 disabled 时，不执行 action_block 语句。可以使用断言控制系统任务来控制 pass 和 fail 语句的执行。断言控制系统任务在 20.12 中描述。
+
+例如：
+```verilog
+property abc(a, b, c);
+    disable iff (a==2) @(posedge clk) not (b ##1 c);
+endproperty
+
+env_prop: assert property (abc(rst, in1, in2))
+    $display("env_prop passed.");
+    else $display("env_prop failed.");
+```
+
+当不需要执行任何动作时，指定一个空语句（即，`;`）。如果没有为 else 指定语句，则在断言失败时使用 `$error` 作为语句。
+
+action_block 不得包含任何并发 `assert`、`assume` 或 `cover` 语句。但是，action_block 可以包含立即断言语句。
+
+关于默认严重性（错误）和在并发断言动作块中使用严重性系统任务的约定应与 16.3 中指定的立即断言的约定相同。
+
+`assert` 语句的 pass 和 fail 语句在 Reactive 区域中执行。执行区域在第 4 章的调度语义中解释。
+
+### 16.14.2 假设语句
+`assume` 语句的目的是允许属性被视为对形式分析和动态仿真工具的假设。当属性被假定时，工具约束环境，以使属性保持。
+
+对于形式分析，没有义务验证假设的属性是否成立。假设的属性可以被视为证明断言属性的假设。
+
+对于仿真，环境必须被约束，以使假设的属性保持。与断言属性一样，假设的属性必须被检查，并在不成立时报告。当假设的属性被评估为 true 时，执行 action_block 的 pass 语句。如果评估为 false，则执行 action_block 的 fail 语句。例如：
+```verilog
+property abc(a, b, c);
+    disable iff (c) @(posedge clk) a |=> b;
+endproperty
+
+env_prop: assume property (abc(req, gnt, rst)) else $error("Assumption failed.");
+```
+
+如果属性具有禁用评估，则不执行 action_block 的 pass 或 fail 语句。可以使用断言控制系统任务来控制 pass 和 fail 语句的执行。断言控制系统任务在 20.12 中描述。
+
+此外，对于随机仿真，对输入进行偏置提供了一种进行随机选择的方法。可以将表达式与偏置关联，如下所示：
+```verilog
+expression dist { dist_list } ; // from A.2.10
+```
+
+分布集和 `dist` 运算符在 18.5.4 中解释。
+
+当属性被假定为驱动随机仿真时，偏置特性是有用的。当 `assert` 或 `cover` 断言语句中使用具有偏置的属性时，`dist` 运算符等效于 `inside` 运算符，并且权重规范被忽略。例如：
+```verilog
+a1:assume property ( @(posedge clk) req dist {0:=40, 1:=60} ) ;
+
+property proto ;
+    @(posedge clk) req |-> req[*1:$] ##0 ack;
+endproperty
+```
+
+这等效于以下内容：
+```verilog
+a1_assertion:assert property ( @(posedge clk) req inside {0, 1} ) ;
+
+property proto_assertion ;
+    @(posedge clk) req |-> req[*1:$] ##0 ack;
+endproperty
+```
+
+在上面的示例中，在假设 a1 中信号 req 用分布指定，并转换为等效断言 a1_assertion。
+
+应该注意，假设的属性必须以相同的方式保持，无论是否使用偏置。当在随机仿真中使用假设语句时，偏置仅提供一种在特定时间进行随机选择的方法，根据指定的权重选择自由变量的值。
+
+考虑一个指定简单同步请求和确认协议的示例，其中变量 req 可以在任何时候被提出，并且必须保持到 ack 被断言为真。在下一个时钟周期中，req 和 ack 必须被取消。
+
+控制 req 的属性如下：
+```verilog
+property pr1;
+    @(posedge clk) !reset_n |-> !req; // 当 reset_n 被断言为真（0）时，保持 req 为 0
+endproperty
+
+property pr2;
+    @(posedge clk) ack |=> !req; // ack 之后的一个周期，req 必须被取消
+endproperty
+
+property pr3;
+    @(posedge clk) req |-> req[*1:$] ##0 ack; // 保持 req 被断言为真，直到 ack 被断言为真
+endproperty
+```
+
+控制 ack 的属性如下：
+```verilog
+property pa1;
+    @(posedge clk) !reset_n || !req |-> !ack;
+endproperty
+
+property pa2;
+    @(posedge clk) ack |=> !ack;
+endproperty
+```
+
+当验证必须响应 req 的协议控制器的行为时，应证明断言 assert_ack1 和 assert_ack2，同时假定语句 a1、assume_req1、assume_req2 和 assume_req3 在任何时候都成立。
+```verilog
+a1:assume property (@(posedge clk) req dist {0:=40, 1:=60} );
+assume_req1:assume property (pr1);
+assume_req2:assume property (pr2);
+assume_req3:assume property (pr3);
+
+assert_ack1:assert property (pa1)
+    else $display("\n ack asserted while req is still deasserted");
+assert_ack2:assert property (pa2)
+    else $display("\n ack is extended over more than one cycle");
+```
+
+### 16.14.3 覆盖语句
+存在两种覆盖语句：`cover sequence` 和 `cover property`。`cover sequence` 语句指定序列覆盖，而 `cover property` 语句指定属性覆盖。两者都监视设计的行为以获取覆盖率。工具将收集覆盖信息，并在仿真结束时报告结果，或通过断言 API（参见 39 条款）按需报告。两种语句之间的区别在于，对于序列覆盖，每次评估尝试的所有匹配都会报告，而对于属性覆盖，每次评估尝试的覆盖计数最多增加一次。覆盖语句可以有一个可选的 pass 语句。pass 语句不得包含任何并发 `assert`、`assume` 或 `cover` 语句。
+
+对于属性覆盖，语句如下：
+```verilog
+cover property ( property_spec ) statement_or_null
+```
+
+属性的覆盖语句的结果应包含以下内容：
+ - 尝试次数
+ - 成功次数（每次尝试最多一次成功）
+ - 因虚无成功而成功的次数
+
+statement_or_null 中指定的 pass 语句应在底层 property_spec 的每次成功评估尝试中执行一次。pass 语句应在相应评估尝试成功的时间步骤的 Reactive 区域中执行。可以使用断言控制系统任务来控制 statement_or_null 语句的执行。断言控制系统任务在 20.12 中描述。
+
+成功或虚无成功的覆盖计数不包括禁用的评估。尝试计数器包括禁用计算的尝试。有关获取断言覆盖结果的详细信息，请参见 40.5.3。
+
+对于序列覆盖，语句如下：
+```verilog
+cover sequence (
+    [clocking_event ] [ disable iff ( expression_or_dist ) ] sequence_expr )
+    statement_or_null
+```
+
+序列的覆盖结果应包含以下内容：
+ - 尝试次数
+ - 匹配次数（每次尝试可以生成多个匹配）
+
+对于给定的 `cover sequence` 语句的尝试，完成而不发生 `disable iff` 条件的匹配的 sequence_expr 的所有匹配都将被计数，具有多重性，计入尝试的总匹配次数。尝试的其他匹配不会计入尝试的总数。statement_or_null 中指定的 pass 语句应在计入尝试的总数的每个匹配中执行，具有多重性。pass 语句应在相应匹配完成的时间步骤的 Reactive 区域中执行。可以使用断言控制系统任务来控制 statement_or_null 语句的执行。断言控制系统任务在 20.12 中描述。
+
+对于给定的 `cover sequence` 语句的尝试，尝试的总匹配次数等于在相应的尝试中执行 `increment_match_coverage()` 的次数。
+```verilog
+assert property (
+    [clocking_event] [ disable iff ( expression_or_dist ) ]
+    sequence_expr |-> ( 1'b1, increment_match_coverage() ) );
+```
+
+对于每次执行 `increment_match_coverage()`，覆盖序列语句的 pass 语句在相同时间步骤的 Reactive 区域中执行。
+
+### 16.14.4 限制语句
+在形式验证中，为了使工具能够收敛于属性的证明或将设计初始化为特定状态，通常需要约束状态空间。为此，引入了 `restrict property` 语句。它与 `assume property` 具有相同的语义，但与该语句不同，`restrict property`语句不会在仿真中验证，并且没有动作块。
+
+语句的形式如下：
+```verilog
+restrict property ( property_spec ) ;
+```
+
+没有与语句关联的动作块。
+
+例如：
+
+假设当控制位 ctr 的值为 0 时，ALU 执行加法，当它为 1 时，执行减法。需要形式验证 ALU 在执行加法时某些行为是正确的（在另一个验证会话中，可以通过更改限制来执行减法）。可以使用语句限制行为：
+```verilog
+restrict property (@(posedge clk) ctr == '0);
+```
+
+这并不意味着 ctr 不能在仿真中的任何测试用例中为 1；这不是一个错误。
+
+### 16.14.5 在过程代码之外使用并发断言语句
+并发断言语句可以在过程上下文之外使用。它可以在模块、接口或程序中使用。并发断言语句是 `assert`、`assume`、`cover` 或 `restrict` 语句。这样的并发断言语句使用 `always` 语义，这意味着在其前导时钟事件的每次出现时，对底层 property_spec 的新评估尝试开始。
+
+以下两种形式是等效的：
+```verilog
+assert property ( property_spec ) action_block
+always assert property ( property_spec ) action_block ;
+```
+
+类似地，以下两种形式是等效的：
+```verilog
+cover property ( property_spec ) statement_or_null
+always cover property ( property_spec ) statement_or_null
+```
+
+例如：
+```verilog
+module top(input logic clk);
+    logic a,b,c;
+    property rule3;
+        @(posedge clk) a |-> b ##1 c;
+    endproperty
+    a1: assert property (rule3);
+    ...
+endmodule
+```
+
+rule3 是在模块 top 中声明的属性。assert 语句 a1 从开始到结束检查属性。属性总是被检查。类似地，
+```verilog
+module top(input logic clk);
+    logic a,b,c;
+    sequence seq3;
+        @(posedge clk) b ##1 c;
+    endsequence
+    c1: cover property (seq3); 
+    ...
+endmodule
+```
+
+cover 语句 c1 从开始到结束监视序列 seq3 的覆盖。序列总是被监视。
+
+
 
 
 
