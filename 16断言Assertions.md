@@ -3828,7 +3828,798 @@ endmodule
 
 cover 语句 c1 从开始到结束监视序列 seq3 的覆盖。序列总是被监视。
 
+### 16.14.6 在过程代码中嵌入并发断言
+并发断言语句也可以嵌入到过程块中。例如：
+```verilog
+property rule;
+    a ##1 b ##1 c;
+endproperty
 
+always @(posedge clk) begin
+    <statements> 
+    assert property (rule); 
+end
+```
 
+术语 *过程并发断言* 用于指代出现在过程代码中的任何并发断言语句（见 16.2）。和立即断言不同，当在过程代码中到达时，不会立即评估一个过程并发断言。相反，断言和其断言参数（见 16.14.6.1）中出现的所有常量和自动表达式的当前值被放置在与当前执行过程相关联的 *过程断言队列* 中。这个队列中的每个条目被称为一个 *待处理过程断言实例*。由于过程中的任何给定语句可能被执行多次（例如，在循环中），一个特定的过程并发断言可能在一个时间步骤中产生许多待处理过程断言实例。出现在过程代码中的并发断言语句被称为 *静态并发断言语句*。
 
+在每个仿真时间步骤的 Observed 区域中，当前存在于过程断言队列中的每个待处理过程断言实例都将 *成熟*，这意味着它被确认执行。当一个待处理过程断言实例成熟时，如果当前时间步骤是与该断言实例的主时钟事件相对应的时间步骤，则在 Observed 区域内立即开始断言的评估尝试。如果断言的主时钟事件在这个时间步骤中没有发生，那么成熟的实例将被放置在 *成熟的断言队列* 中，这将导致断言在下一个与断言的主时钟事件相对应的时钟事件上开始评估尝试。
 
+如果在过程中达到了 *过程断言刷新点*（见 16.14.6.2），则其过程断言队列将被清除。任何当前的待处理过程断言实例将不会成熟，除非在过程执行过程中再次放置在队列中。
+
+如果在过程并发断言中没有指定时钟事件，则断言的主时钟事件应从过程上下文中推断，如果可能的话。如果无法从过程上下文中推断出时钟，则时钟应从默认时钟推断（14.12），就好像断言是立即实例化在过程之前。
+
+对于满足以下要求的 always 或 initial 过程，将推断出上下文的时钟：
+ - 过程中没有阻塞时序控制。
+ - 过程中有且仅有一个事件控制。
+ - 过程的事件控制中的一个且仅有一个事件表达式满足以下两个条件：
+    - 事件表达式仅由事件变量、仅由时钟块事件组成，或者是 `edge_identifier expression1 [ iff expression2 ]` 的形式，并且不是此形式的事件表达式的子表达式。
+    - 如果事件表达式仅由事件变量或时钟块事件组成，则它不会在过程的主体中的任何其他地方出现，除了作为时钟事件或在断言语句中。如果事件表达式是 `edge_identifier expression1 [ iff expression2 ]` 的形式，则 expression1 中的任何项都不会在过程的主体中的任何其他地方出现，除了作为时钟事件或在断言语句中。
+
+如果满足这些要求，则第三个要求中的唯一事件表达式将被推断为过程的上下文时钟。
+
+例如，在以下代码片段中，时钟事件 `@(posedge mclk)` 被推断为 r1_p1 的时钟事件，而 r1_p2 被推断为 `@(posedge scanclk)r1`：
+```verilog
+property r1;
+    q != d;
+endproperty
+
+always @(posedge mclk) begin
+    q <= d1;
+    r1_p1: assert property (r1); 
+    r1_p2: assert property (@(posedge scanclk)r1); 
+end
+```
+
+上面断言 r1_p2 的结果取决于 mclk 和 scanclk 的相对频率。例如：
+ - 如果 scanclk 的频率是 mclk 的两倍，则只有每个 scanclk 的上升沿会导致 r1_p2 的评估。只有在过程执行期间到达时才会排队，这发生在 mclk 的上升沿。
+ - 如果 mclk 的频率是 scanclk 的两倍，则每个 scanclk 的上升沿都会导致两个 r1_p2 的待处理过程实例成熟。因此，每个 scanclk 的上升沿都会看到 r1_p2 评估并报告两次。
+
+另请参见 17.4，了解检查器中的上下文时钟推断，以及 17.5，了解检查器过程中时钟推断的示例。
+
+另一个更复杂的合法示例如下：
+```verilog
+property r2;
+    q != d;
+endproperty
+
+always_ff @(posedge clock iff reset == 0 or posedge reset) begin
+    cnt <= reset ? 0 : cnt + 1;
+    q <= $past(d1);
+    r2_p: assert property (r2);
+end
+```
+
+在上面的示例中，推断的时钟是 `posedge clock iff reset == 0`。推断的时钟不是 `posedge` clock，因为 `posedge` clock 是 `posedge clock iff reset == 0` 的一个子表达式。
+
+相反，在以下示例中，没有推断出时钟：
+```verilog
+property r3;
+    q != d;
+endproperty
+
+always_ff @(clock iff reset == 0 or posedge reset) begin
+    cnt <= reset ? 0 : cnt + 1;
+    q <= $past(d1);
+    r3_p: assert property (r3);
+end
+```
+
+`posedge reset` 的边缘表达式不能被推断，因为 reset 在过程中被引用，而表达式 `clock iff reset == 0` 不能被推断，因为它没有边缘标识符。在没有默认时钟的情况下，上面的代码会导致错误。
+
+在以下示例中，由于在 always 过程中存在多个事件控制和延迟，没有推断出时钟：
+```verilog
+property r4;
+    q != d;
+endproperty
+
+always @(posedge mclk) begin
+    #10 q <= d1; // 延迟阻止时钟推断
+    @(negedge mclk) // 事件控制阻止时钟推断
+    #10 q1 <= !d1;
+    r4_p: assert property (r4); // 没有推断出时钟
+end
+```
+
+#### 16.14.6.1 用于过程并发断言的参数
+过程并发断言在添加到过程断言队列时保存其 `const` 表达式和自动变量的值。此断言评估尝试使用这些保存的值进行评估。例如：
+```verilog
+// 假设对于此示例，(posedge clk) 不会在时间 0 发生
+always @(posedge clk) begin
+    int i = 10;
+    for (i=0; i<10; i++) begin
+        a1: assert property (foo[i] && bar[i]);
+        a2: assert property (foo[const'(i)] && bar[i]);
+        a3: assert property (foo[const'(i)] && bar[const'(i)]);
+    end
+end
+```
+
+在任何给定的时钟周期中，这些断言中的每一个都将导致 10 个排队的执行。然而，断言 a1 的每次执行都将检查 `(foo[10] && bar[10])` 的值，因为 i 的采样值将始终是 10，这是从上一个过程执行中的最终值。在 a2 的情况下，它的执行将检查 `(foo[0] && bar[10])`、`(foo[1] && bar[10])`、... `(foo[9] && bar[10])`。断言 a3，因为它在两个 i 的使用中都有 `const` 强制转换，将检查 `(foo[0] && bar[0])`、`(foo[1] && bar[1])`、... `(foo[9] && bar[9])`。因此，上面的代码片段在逻辑上等效（除了实例名称）于以下内容：
+```verilog
+default clocking @(posedge clk); endclocking
+generate for (genvar i=0; i<10; i++) begin
+    a1: assert property (foo[10] && bar[10]);
+    a2: assert property (foo[i] && bar[10]);
+    a3: assert property (foo[i] && bar[i]);
+end
+endgenerate
+```
+
+由于自动变量也保存其立即值，因此在以下示例中，所有三个属性 a4、a5 和 a6 在逻辑上是等效的：
+```verilog
+always @(posedge clk) begin
+    // 在 for 语句中声明的变量是自动的（见 12.7.1）
+    for (int i=0; i<10; i++) begin
+        a4: assert property (foo[i] && bar[i]);
+        a5: assert property (foo[const'(i)] && bar[i]);
+        a6: assert property (foo[const'(i)] && bar[const'(i)]);
+    end
+end
+```
+
+当过程并发断言包含时间表达式并成熟时，过程的执行流不再直接影响未来时间步骤中成熟的实例。换句话说，过程执行只影响断言实例的激活，而不影响未来时间步骤中时间表达式的完成。然而，由于由于常量或自动变量传递给断言实例，因此这些值在该实例的评估期间保持不变。以下示例说明了这种行为：
+```verilog
+wire w;
+always @(posedge clk) begin : procedural_block_1
+    if (my_activation_condition == 1) begin
+        for (int i=0; i<2; i++) begin
+            a7: assume property (foo[i] |=> bar[i] ##1 (w==1'b1));
+        end
+    end
+end
+```
+
+在 my_activation_condition 为 1 时，两个待处理的 a7 实例将被放置在过程断言队列中，一个对应于每个 i 的值。假设它们成功成熟，并且 `foo[0]` 在当前时间步骤中为 true。这意味着在下一个 clk 上升沿时，无论 procedural_block_1 的执行或 my_activation_condition 的值如何，该成熟的 a7 实例将检查 `bar[0]` 是否为 true。由于在排队断言时使用的自动 i 的常量值仍然有效，因此在该断言评估的任何未来时钟周期中。然后，一个周期后，该断言还将检查 w 的采样值是否为 1'b1。
+
+应用于过程并发断言参数的规则也适用于出现在其动作块中的变量。因此，动作块中使用的常量或变量值，也就是断言语句本身，也将在该实例的评估期间保持不变。下面的示例说明了这种行为：
+```verilog
+// 假设对于此示例，(posedge clk) 不会在时间 0 发生
+always @(posedge clk) begin
+    int i = 10;
+    for (i=0; i<10; i++) begin
+        a8: assert property (foo[const'(i)] && bar[i]) else
+            $error("a8 failed for const i=%d and i=%d", const'(i), $sampled(i)); 
+    end
+end
+```
+
+一旦失败，前面的断言的任何实例都将显示在该实例中用于 “const i=” 的常量值 i（可能是从 0 到 9），而打印的字符串将始终以 “i=10” 结尾，因为 10 将是从 Preponed 区域捕获的采样值。
+
+当在代码中使用条件语句嵌入过程并发断言时，重要的是记住过程中条件语句的当前值被使用，而不是采样值。这与断言的表达式不同，断言的表达式使用采样值。下面的示例说明了这种情况：
+```verilog
+// 假设 a、b、c 和 en 都不是自动的
+always @(posedge clk) begin
+    en = ...;
+    if (en) begin
+        a9: assert property p1(a,b,c);
+    end
+    if ($sampled(en)) begin
+        a10: assert property p1(a,b,c);
+    end
+end
+```
+
+断言 a9 在 en 变为 true 的任何时间步骤上排队，而 a10 在采样值为 true 的任何时间步骤上排队。因此，假设代码中没有其他内容修改 en，a10 的检查将比 a9 的检查晚一个时间步骤，尽管两者都在其相应时间步骤上使用了 a、b 和 c 的采样值。
+
+注意：这是本标准与 IEEE Std 1800-2005 的 17.13 之间的一个不兼容的领域。在 2005 年的定义中，en 将被检测为 a9 的推断启用条件（在本标准中不再存在的定义），并始终被采样，因此 a9 和 a10 将具有相同的行为。
+
+#### 16.14.6.2 过程断言刷新点
+过程被定义为到达过程断言刷新点，如果发生以下情况之一：
+ - 该过程，由于到达事件控制或等待语句而被挂起，恢复执行。
+ - 该过程由 `always_comb` 或 `always_latch` 声明，并且由于其依赖信号之一的转换而恢复执行。
+ - 该过程的最外层范围被 disable 语句禁用（见 16.14.6.4）。
+
+以下示例显示了过程并发断言如何避免由于单个仿真时间步中的过渡组合值而导致多次评估：
+```verilog
+assign not_a = !a;
+default clocking @(posedge clk); endclocking
+always_comb begin : b1
+    // 在此示例中最好不要在此示例中使用常量
+    // ...但使用它们来说明刷新方法的效果
+    a1: assert property (const'(not_a) != const'(a));
+end
+```
+
+当 a 在一个时间步中发生变化，此时时钟上升沿触发，仿真器可能会两次评估断言 a1——一次是由于 a 的变化，一次是连续赋值之后 not_a 的变化。第一次执行 a1，将会报告一个失败，将在过程的过程断言队列中排队。当 not_a 发生变化时，由于 b1 的激活，过程断言队列将被刷新，一个新的待处理的过程并发断言实例将被排队，使用正确的值，因此不会报告 a1 的失败。
+
+以下示例说明了在时间延迟存在的情况下，过程并发断言的行为：
+```verilog
+default clocking @(posedge clk); endclocking
+always @(a or b) begin : b1
+    a2: assert property (a == b) r.success(0) else r.error(0, a, b);
+    #1;
+    a3: assert property (a == b) r.success(1) else r.error(1, a, b);
+end
+```
+
+在这种情况下，由于过程中的时间延迟，Observed 区域总是在 a2 排队之后，但在刷新点之前到达。因此，a2 将始终成熟。对于 a3，在已经排队的时间步中，如果 a 或 b 在之后发生变化，断言将始终被刷新，永远不会成熟。通常，当与时间延迟混合使用时，应谨慎使用过程并发断言。
+
+以下示例说明了在 `cover` 而不是 `assert` 中使用过程并发断言语句的典型用法：
+```verilog
+assign a = ...;
+assign b = ...;
+default clocking @(posedge clk); endclocking
+always_comb begin : b1
+    ...
+    c1: cover property (const'(b) != const'(a));
+end
+```
+
+在此示例中，目标是确保某些测试覆盖了 a 和 b 在过程代码中的不同值的情况。由于仿真器中赋值的任意顺序，可能会出现这样的情况，在一个周期中，存在一个正的时钟边沿，同时两个变量被赋予相同的值，b1 被执行，而 a 已经被赋值，但 b 仍然保持其先前的值。因此 c1 将被排队，但这实际上是一个故障，可能不是一个有用的覆盖信息。但是，当 b1 下次执行时（在 b 也被赋值其新值之后），该覆盖点将被刷新，当覆盖点成熟时，c2 将正确地在该时间步中未被报告为已覆盖。
+
+#### 16.14.6.3 过程并发断言和毛刺
+一个常见的关注是断言执行中的毛刺，其中同一个断言在一个时间步中执行多次，并在暂时值上报告不希望的失败，这些值尚未收到该步骤的最终值。一般来说，过程并发断言是免疫毛刺的，因为过程执行顺序的刷新机制，但仍然可能受到由于区域之间的执行循环而导致的毛刺的影响。
+
+例如，如果 Reactive 区域中的代码修改信号并导致在 Active 区域中的另一个通过，则可能会产生一些毛刺行为，因为 Active 区域中的新通过可能会重新排队过程并发断言，并且可能会在成熟的断言队列中添加第二次评估尝试。下面的代码说明了这种情况：
+```verilog
+always_comb begin : procedural_block_1
+    if (en)
+        foo = bar;
+end
+
+always_comb begin : procedural_block_2
+    p1: assert property ( @(posedge clk) (const'(foo) == const'(bar)) );
+end
+```
+
+假设 bar 在代码的其他地方在时钟的 posedge 处被赋予一个新值，并且 en 为 1，因此对 procedural_block_1 的赋值发生。在 Active 区域中，procedural_block_2 可能会执行两次：一次在 bar 的初始更改时，一次在更新 foo 的赋值之后。在第一次执行 procedural_block_2 时，将排队一个待处理的 p1 实例，并且如果成熟，将导致断言失败。但是，此实例将在成熟之前被刷新，因此不会出现毛刺。
+
+然而，现在假设在相同的示例中，en 为 0，并且 bar 的值是通过 Reactive 区域中的 VPI 代码赋值给 foo。在这种情况下，Observed 区域已经发生，因此 p1 已经成熟并执行，并且由于 foo 和 bar 具有不同的值而报告了断言失败。在 Reactive 区域之后，将有另一个 Active 区域，在该区域中将执行 procedural_block_2，并且这次将通过一个新排队的 p1 实例。但这对于防止在时间步骤的早期报告失败来说太晚了。
+
+#### 16.14.6.4 禁用过程并发断言
+`disable` 语句将影响过程并发断言的行为，如下：
+ - 可以禁用特定的过程并发断言。该断言的所有待处理实例将从队列中清除。任何其他断言的待处理实例将保留在队列中。
+ - 当 `disable` 应用于具有待处理过程断言队列的过程的最外层范围时，除了正常的禁用活动（见 9.6.2）之外，待处理过程断言队列将被刷新，并且队列中的所有待处理断言实例都将被清除。
+
+一旦过程并发断言评估尝试成熟，它将不受任何禁用的影响。
+
+禁用任务或过程的非最外层范围不会导致刷新任何待处理的过程断言实例。
+
+以下示例说明了用户代码如何显式刷新待处理的过程断言实例。在这种情况下，a1 的实例只在 bad_val_ok 未解决为 1 的值的时间步中成熟。
+```verilog
+default clocking @(posedge clk); endclocking
+always @(bad_val or bad_val_ok) begin : b1
+    a1: assert property (bad_val) else $fatal(1, "Sorry"); 
+    if (bad_val_ok) begin
+        disable a1;
+    end
+end
+```
+
+以下示例说明了用户代码如何显式刷新过程 b2 的过程断言队列中的所有待处理断言实例：
+```verilog
+default clocking @(posedge clk); endclocking
+always @(a or b or c) begin : b2
+    if (c == 8'hff) begin
+        a2: assert property (a && b);
+    end else begin
+        a3: assert property (a || b);
+    end
+end
+
+always @(clear_b2) begin : b3
+    disable b2;
+end
+```
+
+### 16.14.7 推断值函数
+以下细化时间系统函数可用于查询推断的时钟事件表达式和禁用表达式：
+ - `$inferred_clock` 返回推断的时钟事件的表达式。
+ - `$inferred_disable` 返回包含调用 `$inferred_disable` 的默认禁用声明的禁用表达式。
+
+推断的时钟事件表达式是可以在时钟事件定义中使用的当前解析的事件表达式。它是通过将时钟流规则应用于调用 `$inferred_clock` 的点来获得的。如果在调用 `$inferred_clock` 时没有当前解析的事件表达式，则应发出错误。
+
+推断的禁用表达式是默认禁用声明作用域包含 `$inferred_disable` 调用的禁用条件。如果调用 `$inferred_disable` 不在任何默认禁用声明的作用域内，则调用 `$inferred_disable` 返回 1'b0（false）。
+
+对推断表达式函数的调用只能用作属性或序列声明的形式参数的整个默认值表达式。对推断表达式函数的调用不得出现在属性或序列声明的主体表达式中。如果对推断表达式函数的调用用作属性或序列声明的形式参数的整个默认值表达式，则在属性或序列实例化的点确定的推断表达式将替换该参数的默认值。因此，如果属性或序列实例是断言语句中的顶级属性表达式，则用于替换默认参数 `$inferred_clock` 的事件表达式是在断言语句的位置确定的事件表达式。如果属性或序列实例不是断言语句中的顶级属性表达式，则在属性表达式中的实例位置时钟流规则确定的事件表达式将用作参数的默认值。
+
+考虑以下示例：
+```verilog
+module m(logic a, b, c, d, rst1, clk1, clk2);
+
+    logic rst;
+
+    default clocking @(negedge clk1); endclocking
+    default disable iff rst1;
+
+    property p_triggers(start_event, end_event, form, clk = $inferred_clock, rst = $inferred_disable);
+        @(clk) disable iff (rst)
+        (start_event ##0 end_event[->1]) |=> form;
+    endproperty
+
+    property p_multiclock(clkw, clkx = $inferred_clock, clky, w, x, y, z);
+        @clkw w ##1 @clkx x |=> @clky y ##1 z;
+    endproperty
+
+    a1: assert property (p_triggers(a, b, c));
+    a2: assert property (p_triggers(a, b, c, posedge clk1, 1'b0) );
+
+    always @(posedge clk2 or posedge rst) begin
+        if (rst) ... ;
+        else begin
+            a3: assert property (p_triggers(a, b, c));
+            ...
+        end
+    end
+
+    a4: assert property(p_multiclock(negedge clk2, , posedge clk1, a, b, c, d) );
+
+endmodule
+```
+
+上面的代码在逻辑上等效于以下内容：
+```verilog
+module m(logic a, b, c, d, rst1, clk1, clk2);
+
+    logic rst;
+
+    a1: assert property (@(negedge clk1) disable iff (rst1) a ##0 b[->1] |=> c);
+    a2: assert property (@(posedge clk1) disable iff (1'b0) a ##0 b[->1] |=> c);
+
+    always @(posedge clk2 or posedge rst) begin
+        if (rst) ... ;
+        else begin
+            ...
+            ...
+        end
+    end
+    
+    a3: assert property (@(posedge clk2) disable iff (rst1) (a ##0 b[->1]) |=> c);
+
+    a4: assert property (@(negedge clk2) a ##1 @(negedge clk1) b |=> @(posedge clk1) c ##1 d);
+
+endmodule
+```
+
+在断言 a1 中，时钟事件从默认时钟推断，因此 a1 的 `$inferred_clock` 是 `negedge` clk1。在断言 a2 中，事件表达式 `posedge` clk1 传递给属性 p_triggers 实例的形式参数 clk。因此，对于 clk，不使用 `$inferred_clock`。在断言 a3 中，时钟事件从 always 过程的事件控制推断，因此 a3 的 `$inferred_clock` 是 `posedge` clk2。
+
+在断言 a4 中，由于属性 p_multiclock 在 assert property 语句中实例化，clkw 由实际参数（`negedge` clk2）替换，clkx 由默认参数值 `$inferred_clock` 替换，即属性实例在断言语句中的位置的默认时钟（`negedge` clk1）。第三个时钟 clky 由实际参数（`posedge` clk1）替换，因为它是显式指定的。
+
+断言条件 rst1 从默认禁用声明中推断出来，用于断言 a1 和 a3。断言 a2 使用显式复位值 1'b0，因此可以省略等效断言中的 `disable iff` 语句。
+
+### 16.14.8 非空评估
+属性的计算尝试要么是空，要么非空，如下：
+ - `a)` 属性的计算尝试是序列，则总是非空。
+ - `b)` 属性的计算尝试是 `strong(sequence_expr)`，则总是非空。
+ - `c)` 属性的计算尝试是 `weak(sequence_expr)`，则总是非空。
+ - `d)` 属性的计算尝试是 `not property_expr` 是非空，当且仅当属性_expr 的底层计算尝试是非空。
+ - `e)` 属性的计算尝试是 `property_expr1 or property_expr2` 是非空，当且仅当属性_expr1 的底层计算尝试是非空或属性_expr2 的底层计算尝试是非空。
+ - `f)` 属性的计算尝试是 `property_expr1 and property_expr2` 是非空，当且仅当属性_expr1 的底层计算尝试是非空或属性_expr2 的底层计算尝试是非空。
+ - `g)` 属性的计算尝试是 `if ( expression_or_dist ) property_expr1` 是非空，当且仅当 expression_or_dist 计算为 true 并且 property_expr1 的底层计算尝试是非空。
+   属性的计算尝试是 `if ( expression_or_dist ) property_expr1 else property_expr2` 是非空，当且仅当 expression_or_dist 计算为 true 并且 property_expr1 的底层计算尝试是非空，或者 expression_or_dist 计算为 false 并且 property_expr2 的底层计算尝试是非空。
+ - `h)` 属性的计算尝试是 `sequence_expression |-> property_expr` 是非空，当且仅当存在序列_expression 的成功匹配，并且从匹配的结束点开始的 property_expr 的计算尝试是非空。
+   属性的计算尝试是 `sequence_expression |=> property_expr` 是非空，当且仅当存在序列_expression 的成功匹配，并且从匹配结束点的下一个时钟事件开始的 property_expr 的计算尝试是非空。
+ - `i)` 属性的计算尝试是属性的实例是非空，当且仅当替换实际参数为形式参数的 property_expr 的底层计算尝试是非空。
+ - `j)` 属性的计算尝试是 `sequence_expression #-# property_expr` 是非空，当且仅当存在序列_expression 的成功匹配，并且从匹配的结束点开始的 property_expr 的计算尝试是非空。
+ - `k)` 属性的计算尝试是 `sequence_expression #=# property_expr` 是非空，当且仅当存在序列_expression 的成功匹配，并且从匹配结束点的下一个时钟事件开始的 property_expr 的计算尝试是非空。
+ - `l)` 属性的计算尝试是 `nexttime property_expr` 是非空，当且仅当至少有一个更多的时钟事件，并且在下一个时钟事件开始的评估尝试中，property_expr 是非空。
+ - `m)` 属性的计算尝试是 `nexttime[constant_expression] property_expr` 是非空，当且仅当至少有 constant_expression 个更多的时钟事件，并且在下一个 constant_expression 个时钟事件开始的评估尝试中，property_expr 是非空。
+ - `n)` 属性的计算尝试是 `s_nexttime property_expr` 是非空，当且仅当至少有一个更多的时钟事件，并且在下一个时钟事件开始的评估尝试中，property_expr 是非空。
+ - `o)` 属性的计算尝试是 `s_nexttime[constant_expression] property_expr` 是非空，当且仅当至少有 constant_expression 个更多的时钟事件，并且在下一个 constant_expression 个时钟事件开始的评估尝试中，property_expr 是非空。
+ - `p)` 属性的计算尝试是 `always property_expr` 是非空，当且仅当存在一个时钟事件，property_expr 的评估尝试是非空，并且 property_expr 在之前的时钟事件中没有失败。
+ - `q)` 属性的计算尝试是 `always[cycle_delay_const_range_expression] property_expr` 是非空，当且仅当在 cycle_delay_const_range_expression 指定的范围内存在一个时钟事件，其中 property_expr 的评估尝试是非空，并且 property_expr 在 cycle_delay_const_range_expression 指定的范围内的之前的时钟事件中没有失败。
+ - `r)` 属性的计算尝试是 `s_always[constant_range] property_expr` 是非空，当且仅当在 constant_range 指定的范围内存在一个时钟事件，其中 property_expr 的评估尝试是非空，并且 property_expr 在 constant_range 指定的范围内的之前的时钟事件中没有失败。
+ - `s)` 属性的计算尝试是 `s_eventually property_expr` 是非空，当且仅当存在一个时钟事件，property_expr 的评估尝试是非空。
+ - `t)` 属性的计算尝试是 `s_eventually[constant_range] property_expr` 是非空，当且仅当在 constant_range 指定的范围内存在一个时钟事件，其中 property_expr 的评估尝试是非空。
+ - `u)` 属性的计算尝试是 `eventually property_expr` 是非空，当且仅当存在一个时钟事件，property_expr 的评估尝试是非空。
+ - `v)` 属性的计算尝试是 `property_expr1 until property_expr2` 是非空，当且仅当存在一个时钟事件，property_expr2 的评估尝试是非空，并且 property_expr1 的评估尝试是非空。
+ - `w)` 属性的计算尝试是 `property_expr1 s_until property_expr2` 是非空，当且仅当存在一个时钟事件，property_expr2 的评估尝试是非空，并且 property_expr1 的评估尝试是非空。
+ - `x)` 属性的计算尝试是 `property_expr1 until_with property_expr2` 是非空，当且仅当存在一个时钟事件，property_expr2 的评估尝试是非空，并且 property_expr1 的评估尝试是非空。
+ - `y)` 属性的计算尝试是 `property_expr1 s_until_with property_expr2` 是非空，当且仅当存在一个时钟事件，property_expr2 的评估尝试是非空，并且 property_expr1 的评估尝试是非空。
+ - `z)` 属性的计算尝试是 `property_expr1 implies property_expr2` 是非空，当且仅当属性_expr1 的底层计算尝试是非空，并且属性_expr2 的底层计算尝试是非空。
+ - `aa)` 属性的计算尝试是 `property_expr1 iff property_expr2` 是非空，当且仅当属性_expr1 的底层计算尝试是非空或属性_expr2 的底层计算尝试是非空。
+ - `ab)` 属性的计算尝试是 `accept_on(expression_or_dist) property_expr` 是非空，当且仅当属性_expr 的底层计算尝试是非空，并且 expression_or_dist 在该评估尝试的任何时间步骤中都不成立。
+ - `ac)` 属性的计算尝试是 `reject_on(expression_or_dist) property_expr` 是非空，当且仅当属性_expr 的底层计算尝试是非空，并且 expression_or_dist 在该评估尝试的任何时间步骤中都不成立。
+ - `ad)` 属性的计算尝试是 `sync_accept_on(expression_or_dist) property_expr` 是非空，当且仅当属性_expr 的底层计算尝试是非空，并且 expression_or_dist 在该评估尝试的任何时钟事件中都不成立。
+ - `ae)` 属性的计算尝试是 `sync_reject_on(expression_or_dist) property_expr` 是非空，当且仅当属性_expr 的底层计算尝试是非空，并且 expression_or_dist 在该评估尝试的任何时钟事件中都不成立。
+ - `af)` 属性的计算尝试是
+   ```verilog
+   case (expression_or_dist)
+       expression_or_dist1 : property_stmt1
+       ...
+       expression_or_distn : property_stmtn
+       [ default : property_stmtd ]
+   endcase
+   ```
+   是非空，当且仅当：
+    - 对于某个索引 i，1 <= i <= n，(expression_or_dist === expression_or_disti)，并且
+    - 对于每个索引 j，1 <= j < i，(expression_or_dist !== expression_or_distj)，并且
+    - property_stmti 的底层计算尝试是非空
+   或
+    - default 存在，并且
+    - 对于每个索引 i，1 <= i <= n，(expression_or_dist !== expression_or_disti)，并且
+    - property_stmtd 的底层计算尝试是非空。
+
+ - `ag)` 属性的计算尝试是 `disable iff (expression_or_dist) property_expr` 是非空，当且仅当属性_expr 的底层计算尝试是非空，并且 expression_or_dist 在该评估尝试的任何时间步骤中都不成立。
+
+属性的计算尝试成功非空，当且仅当属性计算为 true 并且计算尝试是非空。
+
+## 16.15 disable iff 解析
+---
+```verilog
+module_or_generate_item_declaration ::= // from A.1.4
+... 
+| default clocking clocking_identifier ;
+| default disable iff expression_or_dist ;
+```
+---
+语法 16-21——默认时钟和默认禁用语法（摘自附录 A）
+
+默认的 `disable iff` 可以在 generate 块内或在模块、接口或程序声明内声明。它为作用域和默认 `disable iff` 声明的子作用域中的所有并发断言提供了默认的禁用条件。此外，默认扩展到作用域内的任何嵌套模块、接口或程序声明，以及嵌套的 generate 块。但是，如果嵌套模块、接口或程序声明或 generate 块本身具有默认 `disable iff` 声明，则该默认 `disable iff` 适用于嵌套声明或 generate 块中，并覆盖外部的任何默认 `disable iff`。在 `disable iff` 声明中引用的任何信号，如果使用作用域解析，则将从声明的作用域解析。
+
+默认 `disable iff` 声明的效果与声明在该作用域内的位置无关。在同一模块、接口、程序声明或 generate 块中的多个默认 `disable iff` 声明将是一个错误。该作用域不会延伸到模块、接口或程序的任何实例。
+
+在以下示例中，模块 m1 声明 rst1 为默认禁用条件，并且在嵌套模块 m2 中没有默认禁用条件。默认禁用条件 rst1 适用于 m1 的声明和嵌套声明 m2。因此，a1 和 a2 的推断禁用条件都是 rst1。
+```verilog
+module m1;
+    bit clk, rst1;
+    default disable iff rst1;
+    a1: assert property (@(posedge clk) p1); // 属性 p1 在其他地方定义
+
+    ...
+    module m2;
+        bit rst2;
+        ...
+        a2: assert property (@(posedge clk) p2); // 属性 p2 在其他地方定义
+    endmodule
+    ...
+endmodule
+```
+
+如果在嵌套模块 m2 中有默认禁用条件声明，则在 m2 中，此默认禁用条件将覆盖 m1 中声明的默认禁用条件。因此，在以下示例中，a1 的推断禁用条件是 rst1，但 a2 的推断禁用条件是 rst2。
+```verilog
+module m1;
+    bit clk, rst1;
+    default disable iff rst1;
+    a1: assert property (@(posedge clk) p1); // 属性 p1 在其他地方定义
+
+    ...
+    module m2;
+        bit rst2;
+        default disable iff rst2;
+        ...
+        a2: assert property (@(posedge clk) p2); // 属性 p2 在其他地方定义
+    endmodule
+    ...
+endmodule
+```
+
+以下规则适用于禁用条件的解析：
+ - `a)` 如果断言具有禁用条件子句，则应使用此子句中指定的禁用条件，并忽略该断言的任何默认禁用条件。
+ - `b)` 如果断言不包含禁用条件子句，但断言在默认禁用条件声明的作用域内，则断言的禁用条件是从默认禁用条件声明中推断的。
+ - `c)` 否则，不执行推断（这相当于推断为 1'b0 禁用条件）。
+
+以下是说明这些规则的两个示例模块：
+```verilog
+module examples_with_default (input logic a, b, clk, rst, rst1);
+    default disable iff rst;
+    property p1;
+        disable iff (rst1) a |=> b;
+    endproperty
+
+    // 禁用条件是 rst1 - 在 a1 中明确指定
+    a1 : assert property (@(posedge clk) disable iff (rst1) a |=> b);
+
+    // 禁用条件是 rst1 - 在 p1 中明确指定
+    a2 : assert property (@(posedge clk) p1);
+
+    // 禁用条件是 rst - 没有明确指定，从默认禁用条件声明中推断
+    a3 : assert property (@(posedge clk) a |=> b);
+
+    // 禁用条件是 1'b0。这是取消默认禁用效果的唯一方法。
+    a4 : assert property (@(posedge clk) disable iff (1'b0) a |=> b);
+endmodule
+
+module examples_without_default (input logic a, b, clk, rst);
+    property p2;
+        disable iff (rst) a |=> b;
+    endproperty
+
+    // 禁用条件是 rst - 在 a5 中明确指定
+    a5 : assert property (@(posedge clk) disable iff (rst) a |=> b);
+
+    // 禁用条件是 rst - 在 p2 中明确指定
+    a6 : assert property (@ (posedge clk) p2);
+
+    // 没有禁用条件
+    a7 : assert property (@ (posedge clk) a |=> b);
+endmodule
+```
+
+## 16.16 时钟解析
+有多种方法可以为属性指定时钟。它们如下：
+ - 使用时钟的序列实例，例如：
+   ```verilog
+   sequence s2; @(posedge clk) a ##2 b; endsequence
+   property p2; not s2; endproperty
+   assert property (p2);
+   ```
+ - 使用属性，例如：
+   ```verilog
+   property p3; @(posedge clk) not (a ##2 b); endproperty
+   assert property (p3);
+   ```
+ - 从过程块推断的上下文时钟，例如：
+   ```verilog
+   always @(posedge clk) assert property (not (a ##2 b));
+   ```
+ - 时钟块，例如：
+   ```verilog
+   clocking master_clk @(posedge clk); 
+       property p3; not (a ##2 b); endproperty
+   endclocking
+   assert property (master_clk.p3);
+   ```
+ - 默认时钟，例如：
+   ```verilog
+   default clocking master_clk ; // master clock as defined above 
+   property p4; (a ##2 b); endproperty
+   assert property (p4); 
+   ```
+
+通常，时钟事件在其范围内适用，除非在内部时钟事件中被覆盖，例如在多时钟序列和属性中的时钟流中。以下规则适用（在下面的规则中使用的术语“*最大属性*”在 F.4 中定义为包含在断言语句中的唯一扁平属性，并通过应用重写算法获得）：
+ - `a)` 在模块、接口、程序或具有默认时钟事件的检查器中，具有没有明确指定的前导时钟事件的并发断言语句被视为已明确写入默认时钟事件作为前导时钟事件。默认时钟事件不适用于时钟块中的序列或属性声明，除非声明出现在其时钟事件为默认时钟事件的时钟块中。
+ - `b)` 在时钟块内部，适用以下规则：
+   - 1) 时钟块内部的任何属性或序列声明中不允许有显式时钟事件。时钟块内部的所有序列和属性声明都被视为已明确写入时钟块的时钟事件作为前导时钟事件。
+   - 2) 时钟块内部不允许多时钟序列和属性。
+   - 3) 如果在时钟块内部实例化了在时钟块外部声明的命名序列或属性，则该实例应为单时钟，并且其时钟事件应与时钟块的时钟事件相同。
+ - `c)` 从过程块推断的上下文时钟事件会覆盖默认时钟事件。推断的时钟事件被视为已明确写入任何适用于推断的并发断言语句的前导时钟事件。具有推断时钟事件的并发断言语句的最大属性应为单时钟。
+ - `d)` 并发断言语句中的显式前导时钟事件会覆盖默认时钟事件。
+ - `e)` 多时钟序列或属性可以继承默认时钟事件作为其前导时钟事件。如果多时钟属性是并发断言语句的最大属性，则该属性应具有唯一的语义前导时钟（请参见 16.16.1）。
+ - `f)` 如果并发断言语句没有显式前导时钟事件，没有默认前导时钟事件，并且没有上下文推断的前导时钟事件适用于断言语句，则断言语句的最大属性应为已确定唯一前导时钟事件的序列或属性的实例。
+
+以下是两个示例模块，说明了这些规则的应用，其中包含一些合法和一些非法声明，如注释所示：
+```verilog
+module examples_with_default (input logic a, b, c, clk);
+    property q1;
+        $rose(a) |-> ##[1:5] b;
+    endproperty
+
+    property q2;
+        @(posedge clk) q1;
+    endproperty
+
+    default clocking posedge_clk @(posedge clk);
+        property q3;
+            $fell(c) |=> q1;
+            // 合法：q1 没有时钟事件
+        endproperty
+
+        property q4;
+            $fell(c) |=> q2;
+            // 合法：q2 有与时钟块相同的时钟事件
+        endproperty
+
+        sequence s1;
+            @(posedge clk) b[*3];
+            // 非法：时钟块中的显式时钟事件
+        endsequence
+    endclocking
+
+    property q5;
+        @(negedge clk) b[*3] |=> !b;
+    endproperty
+
+    always @(negedge clk)
+    begin
+        a1: assert property ($fell(c) |=> q1);
+        // 合法：上下文推断的前导时钟事件，@(negedge clk)
+        a2: assert property (posedge_clk.q4);
+        // 合法：将排队（挂起）在 negedge clk 上，然后（如果成熟）在下一个 posedge clk 上检查（请参见 16.14.6）
+        a3: assert property ($fell(c) |=> q2);
+        // 非法：具有上下文推断的多时钟属性
+        a4: assert property (q5);
+        // 合法：上下文推断的前导时钟事件，@(negedge clk)
+    end
+
+    property q6;
+        q1 and q5;
+    endproperty
+
+    a5: assert property (q6);
+    // 非法：默认前导时钟事件，@(posedge clk)，但语义前导时钟不是唯一的
+    a6: assert property ($fell(c) |=> q6);
+
+    sequence s2;
+        $rose(a) |-> ##[1:5] b;
+    endsequence
+
+    c1: cover property (s2);
+    // 合法：默认前导时钟事件，@(posedge clk)
+    c2: cover property (@(negedge clk) s2);
+    // 合法：显式前导时钟事件，@(negedge clk)
+endmodule
+
+module examples_without_default (input logic a, b, c, clk);
+    property q1;
+        $rose(a) |-> ##[1:5] b;
+    endproperty
+
+    property q5;
+        @(negedge clk) b[*3] |=> !b;
+    endproperty
+
+    property q6;
+        q1 and q5;
+    endproperty
+
+    a5: assert property (q6);
+    // 非法：没有默认前导时钟事件
+    a6: assert property ($fell(c) |=> q6);
+    // 非法：没有默认前导时钟事件
+    sequence s2;
+        $rose(a) ##[1:5] b;
+    endsequence
+
+    c1: cover property (s2);
+    // 非法：没有默认前导时钟事件
+    c2: cover property (@(negedge clk) s2);
+    // 合法：显式前导时钟事件，@(negedge clk)
+    sequence s3;
+        @(negedge clk) s2;
+    endsequence
+
+    c3: cover property (s3);
+    // 合法：显式前导时钟事件，@(negedge clk)，从 s3 的声明确定
+    c4: cover property (s3 ##1 b);
+    // 非法：没有默认、推断或显式前导时钟事件，并且最大属性不是实例
+endmodule
+```
+
+### 16.16.1 多时钟序列和属性的语义前导时钟
+贯穿本节中，s、s1 和 s2 表示没有时钟事件的序列；p、p1 和 p2 表示没有时钟事件的属性；m、m1 和 m2 表示多时钟序列；q、q1 和 q2 表示多时钟属性；c、c1 和 c2 表示非相同的时钟事件表达式。
+
+本节定义了多时钟序列或属性的语义前导时钟集合的概念。
+
+一些序列和属性没有显式的前导时钟事件。它们的初始时钟事件是根据时钟事件范围的流程从外部时钟事件继承的。在这种情况下，语义前导时钟被称为继承的。例如，在属性
+```verilog
+@(c) s |=> p and @(c1) p1
+```
+
+子属性 p 的语义前导时钟是继承的，因为 p 的初始时钟是流过 `|=>` 的时钟。
+
+多时钟序列有一个唯一的语义前导时钟，如下定义：
+ - 序列 s 的语义前导时钟是 *继承的*。
+ - `@(c) s` 的语义前导时钟是 c。
+ - 如果 inherited 是 m 的语义前导时钟，则 `@(c) m` 的语义前导时钟是 c。否则，`@(c) m` 的语义前导时钟等于 m 的语义前导时钟。
+ - `(m)` 的语义前导时钟等于 m 的语义前导时钟。
+ - `m1 ##1 m2` 的语义前导时钟等于 m1 的语义前导时钟。
+ - `m1 ##0 m2` 的语义前导时钟等于 m1 的语义前导时钟。
+
+多时钟属性的语义前导时钟集合如下定义：
+ - `strong(m)` 的语义前导时钟集合是 `{c}`，其中 c 是 m 的唯一语义前导时钟。
+ - `weak(m)` 的语义前导时钟集合是 `{c}`，其中 c 是 m 的唯一语义前导时钟。
+ - p 的语义前导时钟集合是 `{inherited}`。
+ - 如果 inherited 是 q 的语义前导时钟集合的元素，则 `@(c) q` 的语义前导时钟集合是从 q 的语义前导时钟集合中通过用 c 替换 inherited 而得到的。否则，`@(c) q` 的语义前导时钟集合等于 q 的语义前导时钟集合。
+ - `(q)` 的语义前导时钟集合等于 q 的语义前导时钟集合。
+ - `not q` 的语义前导时钟集合等于 q 的语义前导时钟集合。
+ - `q1 and q2` 的语义前导时钟集合是 q1 的语义前导时钟集合与 q2 的语义前导时钟集合的并集。
+ - `q1 or q2` 的语义前导时钟集合是 q1 的语义前导时钟集合与 q2 的语义前导时钟集合的并集。
+ - `m |-> p` 的语义前导时钟集合等于 m 的语义前导时钟集合。
+ - `m |=> p` 的语义前导时钟集合等于 m 的语义前导时钟集合。
+ - `if (b) q` 的语义前导时钟集合是 `{inherited}`。
+ - `if (b) q1 else q2` 的语义前导时钟集合是 `{inherited}`。
+ - `case (b) b1: q1 … bn: qn [default: qd] endcase` 的语义前导时钟集合是 `{inherited}`。
+ - `nexttime q` 的语义前导时钟集合是 `{inherited}`。
+ - `always q` 的语义前导时钟集合是 `{inherited}`。
+ - `s_eventually q` 的语义前导时钟集合是 `{inherited}`。
+ - `q1 until q2` 的语义前导时钟集合是 `{inherited}`。
+ - `q1 until_with q2` 的语义前导时钟集合是 `{inherited}`。
+ - `accept_on(b) q` 的语义前导时钟集合是 q 的语义前导时钟集合。
+ - `reject_on(b) q` 的语义前导时钟集合是 q 的语义前导时钟集合。
+ - `sync_accept_on(b) q` 的语义前导时钟集合是 `{inherited}`。
+ - `sync_reject_on(b) q` 的语义前导时钟集合是 `{inherited}`。
+ - 属性实例的语义前导时钟集合等于通过将实际参数替换为形式参数从其声明的主体中获得的多时钟属性的语义前导时钟集合。
+
+例如，多时钟序列
+```verilog
+@(c1) s1 ##1 @(c2) s2
+```
+
+具有 c1 作为其唯一语义前导时钟，而多时钟属性
+```verilog
+not (p1 and (@(c2) p2)
+```
+
+具有 `{inherited, c2}` 作为其语义前导时钟集合。
+
+在存在外部时钟事件的情况下，继承的语义前导时钟始终被理解为引用传入的外部时钟。因此，在外部时钟的存在下，属性 q 的时钟等效于 `@(c) q`。
+
+在所有前导时钟都相同的情况下，多时钟属性具有唯一的语义前导时钟。考虑以下示例：
+```verilog
+wire clk1, clk2;
+logic a, b;
+...
+assign clk2 = clk1;
+a1: assert property (@(clk1) a and @(clk2) b); // 非法
+a2: assert property (@(clk1) a and @(clk1) b); // 合法
+always @(posedge clk1) begin
+    a3: assert property(a and @(posedge clk2)); // 非法
+    a4: assert property(a and @(posedge clk1)); // 合法
+end
+```
+
+断言 a2 和 a4 是合法的，而断言 a1 和 a3 是非法的。尽管 a1 的两个时钟具有相同的值，但它们不是相同的。因此，a1 没有唯一的语义前导时钟。断言 a3 和 a4 具有 `@(posedge clk1)` 作为其推断时钟。这个时钟与 `@(posedge clk2)` 不相同，因此 a3 没有唯一的语义前导时钟。
+
+## expect 语句
+`expect` 语句是一种过程阻塞语句，允许等待属性评估。`expect` 语句的语法接受命名属性或属性声明，如下 16-22 所示：
+---
+```verilog
+expect_property_statement ::= // from A.2.10
+expect ( property_spec ) action_block 
+```
+---
+语法 16-22——expect 语句语法（摘自附录 A）
+
+`expect` 语句接受与断言属性相同的语法。`expect` 语句导致执行进程阻塞，直到给定属性成功或失败。`expect` 语句后面的语句在属性完成评估的观察区域处理后执行。当属性成功或失败时，进程解除阻塞，并且属性停止被评估（即，直到再次执行该 `expect` 语句之前不会启动属性评估）。
+
+当执行时，`expect` 语句在后续时钟事件上启动给定属性的单个评估线程，即，第一次评估将在下一个时钟事件上进行。如果属性在其时钟事件上失败，则执行 action_block 的可选 else 子句。如果属性成功，则执行 action_block 的可选 pass 语句。通过使用断言动作控制任务，可以控制 pass 和 fail 语句的执行。断言动作控制任务在 20.12 中描述。
+
+```verilog
+program tst;
+    initial begin
+        # 200ms;
+        expect( @(posedge clk) a ##1 b ##1 c ) else $error( "expect failed" );
+        ABC: ...
+    end
+endprogram
+```
+
+在上面的示例中，`expect` 语句指定了一个由序列 a ##1 b ##1 c 组成的属性。`expect` 语句（在 tst 程序的初始过程中的第二个语句）阻塞，直到匹配序列 a ##1 b ##1 c 或确定不匹配。属性评估在 200 ms 延迟后的 posedge clk 事件发生时开始。如果序列匹配，则进程解除阻塞并继续执行标记为 ABC 的语句。如果序列未匹配，则执行 else 子句，该子句生成运行时错误。要使上面的 `expect` 语句成功，序列 a ##1 b ##1 c 必须从时间 200ms 后的 posedge clk 事件开始匹配。如果在第一个、第二个或第三个时钟事件发生时评估 a、b 或 c 为 false，则序列将不匹配。
+
+`expect` 语句可以出现在任何 `wait` 语句（请参见 9.4.3）可以出现的地方。因为它是一个阻塞语句，所以属性可以引用自动变量以及静态变量。例如，下面的任务在 1 到 10 个时钟节拍之间等待变量 data 等于由自动参数 value 指定的特定值，success 用于返回评估结果：1 表示成功，0 表示失败。
+```verilog
+integer data;
+...
+task automatic wait_for( integer value, output bit success );
+    expect( @(posedge clk) ##[1:10] data == value ) success = 1; 
+    else success = 0;
+endtask
+
+initial begin
+    bit ok;
+    wait_for( 23, ok ); // 等待值 23
+    ...
+end
+```
+
+## 16.18 时钟块和并发断言
+如果并发断言中使用的变量是时钟块变量，则它只会在时钟块中采样。
+
+例如：
+```verilog
+module A;
+    logic a, clk;
+    clocking cb_with_input @(posedge clk);
+        input a;
+        property p1;
+            a;
+        endproperty
+    endclocking
+
+    clocking cb_without_input @(posedge clk);
+        property p1;
+            a;
+        endproperty
+    endclocking
+
+    property p1;
+        @(posedge clk) a;
+    endproperty
+
+    property p2;
+        @(posedge clk) cb_with_input.a;
+    endproperty
+
+    a1: assert property (p1);
+    a2: assert property (cb_with_input.p1);
+    a3: assert property (p2);
+    a4: assert property (cb_without_input.p1);
+endmodule
+```
+
+图 16-17 解释了所有断言的行为。在上面的示例中，a1、a2、a3 和 a4 是等价的。
+![cb and ca](16-17.png)
+
+图 16-17——时钟块和并发断言
