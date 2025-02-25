@@ -869,7 +869,196 @@ endclass
  - 情况 4：a 是非空，b 是非空，a.x 是 5，b.x 是 2。
    - 所有保护子表达式评估为 TRUE。
    - 生成条件约束 `(x<y) -> (x+y == 10)`。
+   - 
 
+### 18.5.14 软约束
+到目前为止描述的（正常）约束可以称为 *硬约束*，因为求解器必须始终满足它们，否则会导致求解器失败。相反，定义为 *软* 的约束的约束表达式指定了一个约束，除非被另一个约束（硬约束或优先级更高的软约束）所否定，否则必须满足。
 
+软约束使得通用验证块的作者能够提供完整的工作环境，更容易扩展，因为求解器会自动忽略被后续更专业的约束所覆盖的通用软约束。软约束通常用于为随机变量指定默认值和分布。例如，通用数据包类的作者可能添加一个约束以确保默认情况下生成合法大小的数据包（在没有其他约束的情况下）：
+```verilog
+class Packet;
+    rand int length;
+    constraint deflt { soft length inside {32,1024}; }
+endclass
+
+Packet p = new();
+p.randomize() with { length == 1512; }
+```
+
+如果通用约束 deflt 未定义为软约束，则调用 randomize 将失败并需要特殊处理。失败可能通过显式关闭约束来解决，这需要额外的过程代码，或者通过使用一个新类来扩展基类并用新的约束覆盖它，这显著复杂化了测试。相反，由软约束指定的默认值将被自动覆盖，这将导致一个更简单的分层测试。
+
+#### 18.5.14.1 软约束优先级
+软约束只表达对一个解决方案优于另一个解决方案的偏好；当它们被其他更重要的约束所否定时，它们将被丢弃。硬约束必须始终满足；它们永远不会被丢弃，因此被认为是最高优先级的。相反，软约束可能被硬约束或其他更高优先级的软约束所覆盖，因此，每个软约束都应与特定优先级相关联。软优先级设计为最后由用户指定的约束将优先。因此，验证环境中的后续层中指定的约束将比前面层中的约束具有更高的优先级。
+
+以下规则确定软约束的优先级：
+ - 在相同构造（约束块、类或结构）范围内的约束相对于其语法声明顺序分配优先级。在构造中后出现的约束具有更高的优先级。
+ - 在外部约束块中的约束相对于类中约束原型（extern 声明）的声明顺序分配优先级。优先级取决于原型声明而不是 out-of-body 声明。在类中后出现的原型具有更高的优先级。
+ - 包含对象（rand 类句柄）中的约束优先级低于容器对象（类或结构）中的所有约束。
+ - 每个包含对象（rand 类句柄）中的约束相对于其类句柄的声明顺序分配优先级。在容器对象（类或结构）中后出现的类句柄具有更高的优先级。如果同一对象包含多次，则包含对象中的约束将具有最高优先级对象的优先级——最后声明的对象的优先级。
+ - 派生类中的约束优先级高于其超类中的所有约束。
+ - 内联约束块中的约束优先级高于被随机化的类中的约束。
+ - 在 foreach 中的软约束的优先级由迭代顺序定义；后续迭代具有更高的优先级。如果关联数组的索引类型的关系运算符未定义，则优先级是实现相关的。
+
+以下示例说明了上述规则：
+```verilog
+class B1;
+    rand int x;
+    constraint a { soft x > 10 ; soft x < 100 ; }
+endclass              /* a1 */     /* a2 */
+
+class D1 extends B1;
+    constraint b { soft x inside {[5:9]} ; }
+endclass              /* b1 */
+
+class B2;
+    rand int y;
+    constraint c { soft y > 10 ; }
+endclass              /* c1 */
+
+class D2 extends B2;
+    constraint d { soft y inside {[5:9]} ; }
+    constraint e ;      /* d1 */
+    rand D1 p1;
+    rand B1 p2;
+    rand D1 p3;
+    constraint f { soft p1.x < p2.x ; }
+endclass              /* f1 */
+
+constraint D2::e { soft y > 100 ; } /* e1 */
+
+D2 d = new();
+initial begin
+    d.randomize() with { soft y inside {10,20,30} ; soft y < p1.x ; };
+end                           /* i1 */                /* i2 */
+```
+
+上面示例中软约束的相对优先级（从高到低）是：
+
+i2→i1→f1→e1→d1→c1→p3.b1→p3.a2→p3.a1→p2.a2→p2.a1→p1.b1→p1.a2→p1.a1
+
+如果句柄 p1 和 p3 引用相同的对象，则相对优先级是：
+
+i2→i1→f1→e1→d1→c1→p3.b1→p3.a2→p3.a1→p2.a2→p2.a1
+
+软约束只能为随机变量指定；不能为 randc 变量指定。
+
+约束求解器实现了以下概念模型：
+ - 考虑两个软约束 c1 和 c2，c1 的优先级高于 c2。
+   1) 求解器首先尝试生成满足 c1 和 c2 的解决方案。
+   2) 如果在（1）中失败，则尝试生成仅满足 c1 的解决方案。
+   3) 如果在（2）中失败，则尝试生成仅满足 c2 的解决方案。
+   4) 如果在（3）中失败，则丢弃 c1 和 c2。
+ - 求解器应满足以下属性：
+   - 如果调用 randomize 仅涉及软约束，则调用永远不会失败。
+   - 如果软约束不显示任何矛盾，则结果与所有约束都声明为硬约束的结果相同。
+
+#### 18.5.14.2 丢弃软约束
+对随机变量的 `disable soft` 约束指定，所有引用给定随机变量的较低优先级软约束都应被丢弃。例如：
+```verilog
+class A;
+    rand int x;
+    constraint A1 { soft x == 3; }
+    constraint A2 { disable soft x; } // 丢弃软约束
+    constraint A3 { soft x inside { 1, 2 }; }
+endclass
+
+initial begin
+    A a = new();
+    a.randomize();
+end
+```
+
+约束 A2 指示求解器丢弃对随机变量 x 的较低优先级软约束，导致约束 A1 被丢弃。因此，求解器只需满足最后一个约束 A3。因此，上面的示例将导致随机变量 x 取值 1 和 2。请注意，如果省略约束 A3，则变量将不受约束。
+
+`disable soft` 约束导致较低优先级软约束被丢弃，无论这些约束是否创建矛盾。这个特性非常有用，可以将解决方案空间扩展到任何先前软约束指定的默认值之外。以下示例说明了这种行为：
+```verilog
+class B;
+    rand int x;
+    constraint B1 { soft x == 5; }
+    constraint B2 { disable soft x; soft x dist {5, 8};}
+endclass
+
+initial begin
+    B b = new();
+    b.randomize();
+end
+```
+
+在这个示例中，B2 中的 `disable soft` 约束导致 B1 中的较低优先级变量 x 的约束被丢弃。因此，求解器将为 x 分配值 5 和 8，分布相等——解决约束：x dist {5,8}。
+
+与上面的示例相比，当省略 `disable soft` 约束时的行为如下：
+```verilog
+class B;
+    rand int x;
+    constraint B1 { soft x == 5; }
+    constraint B3 { soft x dist {5, 8}; }
+endclass
+
+initial begin
+    B b = new();
+    b.randomize();
+end
+```
+
+在上面的示例中，B3 中的软分布约束可以满足值 5。因此，求解器将为 x 分配值 5。通常，如果希望满足软分布约束的分布权重，则应首先丢弃那些较低优先级的软约束。
+
+## 18.6 随机化方法
+## 18.6.1 随机化()
+对象中的变量使用 randomize() 类方法随机化。每个类都有一个内置的 randomize() 虚方法，声明如下：
+```verilog
+virtual function int randomize();
+```
+
+randomize() 方法是一个虚方法，它为对象中的所有活动随机变量生成随机值，这些随机变量受活动约束的约束。
+
+randomize() 方法在成功设置所有随机变量和对象的有效值时返回 1；否则，返回 0。
+
+例：
+```verilog
+class SimpleSum;
+    rand bit [7:0] x, y, z;
+    constraint c { z == x + y; }
+endclass
+```
+
+这个类定义声明了三个随机变量 x、y 和 z。调用 SimpleSum 类的 randomize() 方法将随机化 SimpleSum 类的一个实例：
+```verilog
+SimpleSum p = new;
+int success = p.randomize();
+if (success == 1) ...
+```
+
+检查返回状态可能是必要的，因为状态变量的实际值或在派生类中添加约束可能使看似简单的约束不可满足。
+
+## 18.6.2 pre_randomize() 和 post_randomize()
+每个类都包含 pre_randomize() 和 post_randomize() 方法，这些方法在计算新的随机值之前和之后由 randomize() 方法自动调用。
+
+pre_randomize() 方法的原型如下：
+```verilog
+function void pre_randomize();
+```
+
+post_randomize() 方法的原型如下：
+```verilog
+function void post_randomize();
+```
+
+当调用 obj.randomize() 时，它首先在 obj 上调用 pre_randomize()，并且还在所有启用的随机对象成员上调用 pre_randomize()。计算新的随机值并分配后，randomize() 在 obj 上调用 post_randomize()，并且还在所有启用的随机对象成员上调用 post_randomize()。
+
+用户可以在任何类中重写 pre_randomize() 以在对象随机化之前执行初始化并设置前提条件。如果类是派生类且没有用户定义的 pre_randomize() 实现，则 pre_randomize() 将自动调用 super.pre_randomize()。
+
+用户可以在任何类中重写 post_randomize() 以在对象随机化后执行清理、打印诊断和检查后置条件。如果类是派生类且没有用户定义的 post_randomize() 实现，则 post_randomize() 将自动调用 super.post_randomize()。
+
+如果重写了这些方法，则它们应该调用其相关基类方法；否则，将跳过它们的预和后随机化处理步骤。
+
+pre_randomize() 和 post_randomize() 方法不是虚方法。然而，因为它们由 randomize() 方法自动调用，而 randomize() 方法是虚方法，所以它们似乎表现得像虚方法一样。
+
+### 18.6.3 随机化方法的行为
+ - 在类中声明为静态的随机变量由该类的所有实例共享。每次调用 randomize() 方法时，该变量都会在每个类实例中更改。
+ - 如果 randomize() 失败，则约束不可行，随机变量保留其先前值。
+ - 如果 randomize() 失败，则不会调用 post_randomize()。
+ - randomize() 方法是内置的，不能被覆盖。
+ - randomize() 方法实现对象随机稳定性。可以通过调用其 srandom() 方法（参见 18.13.3）对对象进行种子化。
+ - 内置方法 pre_randomize() 和 post_randomize() 是函数，不能阻塞。
 
 
