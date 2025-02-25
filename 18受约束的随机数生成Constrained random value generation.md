@@ -1061,4 +1061,319 @@ pre_randomize() 和 post_randomize() 方法不是虚方法。然而，因为它�
  - randomize() 方法实现对象随机稳定性。可以通过调用其 srandom() 方法（参见 18.13.3）对对象进行种子化。
  - 内置方法 pre_randomize() 和 post_randomize() 是函数，不能阻塞。
 
+## 18.7 内联约束——randomize() with
+通过使用 randomize() `with` 构造，用户可以在调用 randomize() 方法的地方声明内联约束。这些额外的约束与类中声明的对象约束一起应用。
+
+randomize() with 的语法如下 18-10：
+---
+```verilog
+inline_constraint _declaration ::= // not in Annex A
+class_variable_identifier . randomize [ ( [ variable_identifier_list | null ] ) ] 
+with [ ( [ identifier_list ] ) ] constraint_block 
+randomize_call ::= // from A.1.10
+randomize { attribute_instance } 
+[ ( [ variable_identifier_list | null ] ) ] 
+[ with [ ( [ identifier_list ] ) ] constraint_block ]38
+// 38) 在不是类类型对象的方法调用的 randomize_call 中，关键字 with 后的可选括号中的 identifier_list 是非法的，使用 null 也是非法。
+```
+---
+语法 18-10—内联约束语法（摘自附录 A）
+
+class_variable_identifier 是一个实例化对象的名称。
+
+未命名的 constraint_block 包含要应用的额外内联约束，以及在类中声明的对象约束。
+
+例如：
+```verilog
+class SimpleSum;
+    rand bit [7:0] x, y, z;
+    constraint c { z == x + y; }
+endclass
+
+task InlineConstraintDemo(SimpleSum p);
+    int success;
+    success = p.randomize() with { x < y; };
+endtask
+```
+
+这是之前使用的相同示例；然而，使用 randomize() `with` 来引入一个额外的约束 x < y。
+
+randomize() `with` 构造可以用在任何表达式可以出现的地方。`with` 后面的约束块可以定义与在类中声明的约束相同的约束类型和形式。
+
+randomize() `with` 约束块也可以引用局部变量和子例程参数，消除了在对象类中将局部状态作为成员变量的需要。当约束块不是由可选的括号 identifier_list 引导时，约束块被认为是无限制的。在无限制的约束块中引用的变量名的解析范围从 randomize() `with` 对象类开始；也就是说，用于调用 randomize() `with` 方法的对象句柄的类。然后，如果一个名字在 randomize() `with` 对象类中无法解析，那么这个名字将按照通常的规则在包含内联约束的范围中解析。由 `this` 或 `super` 限定的名字将绑定到用于调用 randomize() `with` 方法的对象句柄的类。因此，如果限定名在 randomize() `with` 对象类中无法解析，那么限定名将被认为是错误的。除了由 this 或 super 限定的名字之外，点名将首先在向下的方式（参见 23.3）中解析，从 randomize() `with` 对象类的范围开始。如果点名在 randomize() `with` 对象类的范围中无法解析，那么它将按照通常的规则在包含内联约束的范围中解析。
+
+`local::` 限定符（参见 18.7.1）用于绕过（randomize() `with` 对象）类的范围，并在包含 randomize 方法调用的（local）范围中开始名称解析。
+
+当 constraint_block 由可选的括号 identifier_list 引导时，约束块被认为是 *受限制的*。在受限制的约束块中，只有以 identifier_list 开始的标识符的名称解析为 randomize() `with` 对象类；所有其他名称将从包含 randomize 方法调用的范围开始解析。当存在括号 identifier_list 时，使用 local:: 限定符，限定名将从包含 randomize 方法调用的范围开始解析，而不管该名称是否在 identifier_list 中。
+
+在下面的示例中，randomize() `with` 类是 C1。
+```verilog
+class C1;
+    rand integer x;
+endclass
+
+class C2;
+    integer x;
+    integer y;
+    task doit(C1 f, integer x, integer z);
+        int result;
+        result = f.randomize() with { x < y + z; };
+    endtask
+endclass
+```
+
+在 f.randomize() `with` 约束块中，x 是 C1 类的成员，隐藏了 C2 中的 x。它也隐藏了 doit() 任务中的 x 参数。y 是 C2 的成员。z 是一个局部参数。
+
+受限制的约束块可用于保证局部变量引用将解析为局部范围。
+```verilog
+class C;
+    rand integer x;
+endclass
+
+function int F(C obj, integer y);
+    F = obj.randomize() with (x) { x < y; };
+endfunction
+```
+
+在这个示例中，只有 x 在对象 obj 中解析，因为只有 x 在 identifier_list 中列出。对 y 的引用永远不会绑定到 obj，即使后来添加了一个名为 y 的属性到类 C 中也是如此。
+
+### 18.7.1 local:: 作用域解析
+randomize() `with` 约束块可以引用类属性和方法调用的局部变量。无限制的内联约束块中的未限定名称首先在 randomize() `with` 对象类的范围内解析，然后在包含 randomize 方法调用的范围（局部范围）内解析。`local::` 限定符修改解析搜索顺序。当应用于内联约束中的标识符时，`local::` 限定符绕过 randomize() `with` 对象类的范围，并在局部范围中解析标识符。
+
+在下面的示例中，randomize() `with` 类是 C，局部范围是函数 F()：
+```verilog
+class C;
+    rand integer x;
+endclass
+
+function int F(C obj, integer x);
+    F = obj.randomize() with { x < local::x; };
+endfunction
+```
+
+在 obj.randomize() 调用的无限制内联约束块中，未限定名称 x 绑定到类 C 的属性（正在随机化的对象的范围），而限定名称 local::x 绑定到函数 F() 的参数（局部范围）。
+
+因此，以下规则适用：
+ - 仅由 `this` 或 `super` 限定的名称将绑定到用于调用 randomize() `with` 方法的对象句柄的类。
+ - 由 `local::` 限定的名称将绑定到包含 randomize 方法调用的局部范围，包含特殊名称 `this` 或 `super`（即，`local::this`）。
+ - `local::` 前缀可用于限定类范围和类型名称。
+ - 就通配符包导入而言，语法形式 `local::a` 与在局部范围中声明的未限定名称 a 语义上相同。
+ - 给定一个方法调用 obj.randomize() `with`，名称 local::obj 将绑定到 randomize() `with` 对象类的范围。
+
+## 18.8 禁用随机变量——rand_mode()
+rand_mode() 方法可用于控制随机变量的活动或非活动。当随机变量处于非活动状态时，它被视为未声明为 `rand` 或 `randc`。非活动变量不会被 randomize() 方法随机化，它们的值被求解器视为状态变量。所有随机变量最初都是活动的。
+
+rand_mode() 方法的语法如下：
+```verilog
+task object[.random_variable]::rand_mode( bit on_off );
+```
+
+或
+```verilog
+function int object.random_variable::rand_mode();
+```
+
+object 是任何表达式，产生随机变量所在的对象句柄。
+
+random_variable 是要应用操作的随机变量的名称。如果未指定（仅在作为任务调用时允许），则操作应用于指定对象中的所有随机变量。
+
+当作为任务调用时，rand_mode 方法的参数确定要执行的操作，如表 18-3 所示。
+
+表 18-3—rand_mode 参数
+| 值 | 含义 | 描述 |
+| -- | -- | -- |
+| 0 | OFF | 将指定的变量设置为非活动状态，因此在随后调用 randomize() 方法时不会被随机化。 |
+| 1 | ON | 将指定的变量设置为活动状态，因此在随后调用 randomize() 方法时会被随机化。 |
+
+对于未打包的数组变量，random_variable 可以使用相应的索引指定单个元素。省略索引会导致数组的所有元素受到调用的影响。
+
+对于未打包的结构变量，random_variable 可以使用相应的成员指定单个成员。省略成员会导致结构的所有成员受到调用的影响。
+
+如果随机变量是对象句柄，则只更改变量的模式，而不更改该对象中的随机变量的模式（请参见 18.5.9 中的全局约束）。
+
+一个编译错误将被发出，如果指定的变量在类层次结构中不存在，或者它存在但未声明为 `rand` 或 `randc`。
+
+当作为函数调用时，rand_mode() 返回指定随机变量的当前活动状态。如果变量是活动的（ON），则返回 1；如果变量是非活动的（OFF），则返回 0。
+
+rand_mode() 函数形式仅接受单个变量；因此，如果指定的变量是未打包的数组，则应通过其索引选择单个元素。
+
+例：
+```verilog
+class Packet;
+    rand integer source_value, dest_value;
+    ... other declarations
+endclass
+
+int ret;
+Packet packet_a = new;
+// 关闭对象中的所有变量
+packet_a.rand_mode(0);
+
+// ... 其他代码
+// 启用 source_value
+packet_a.source_value.rand_mode(1);
+
+ret = packet_a.dest_value.rand_mode();
+```
+
+这个例子首先禁用对象 packet_a 中的所有随机变量，然后仅启用 source_value 变量。最后，它将 ret 变量设置为变量 dest_value 的活动状态。
+
+rand_mode() 方法是内置的，不能被覆盖。
+
+如果随机变量被声明为 `static`，则随机变量的 rand_mode 状态也应该是静态的。例如，如果 rand_mode() 设置为非活动状态，则随机变量在基类的所有实例中都是非活动的。
+
+## 18.9 控制约束——constraint_mode()
+constraint_mode() 方法可用于控制约束的活动或非活动。当约束处于非活动状态时，它不会被 randomize() 方法考虑。所有约束最初都是活动的。
+
+constraint_mode() 方法的语法如下：
+```verilog
+task object[.constraint_identifier]::constraint_mode( bit on_off );
+```
+
+或
+```verilog
+function int object.constraint_identifier::constraint_mode();
+```
+
+object 是任何表达式，产生约束所在的对象句柄。
+
+constraint_identifier 是要应用操作的约束块的名称。约束名称可以是类层次结构中的任何约束块的名称。如果未指定约束名称（仅在作为任务调用时允许），则操作应用于指定对象中的所有约束。
+
+当作为任务调用时，constraint_mode 方法的参数确定要执行的操作，如表 18-4 所示。
+
+表 18-4—constraint_mode 参数
+| 值 | 含义 | 描述 |
+| -- | -- | -- |
+| 0 | OFF | 将指定的约束块设置为非活动状态，因此在随后调用 randomize() 方法时不会被考虑。 |
+| 1 | ON | 将指定的约束块设置为活动状态，因此在随后调用 randomize() 方法时会被考虑。 |
+
+如果约束块不存在于类层次结构中，或者存在但未声明为约束块，则将发出编译错误。
+
+当作为函数调用时，constraint_mode() 返回指定约束块的当前活动状态。如果约束块是活动的（ON），则返回 1；如果约束块是非活动的（OFF），则返回 0。
+
+例如：
+```verilog
+class Packet;
+    rand integer source_value;
+    constraint filter1 { source_value > 2 * m; }
+endclass
+
+function integer toggle_rand( Packet p );
+    if ( p.filter1.constraint_mode() )
+        p.filter1.constraint_mode(0);
+    else
+        p.filter1.constraint_mode(1);
+    toggle_rand = p.randomize();
+endfunction
+```
+
+在这个例子中，toggle_rand 函数首先检查指定 Packet 对象 p 中约束 filter1 的当前活动状态。如果约束是活动的，函数将其停用；如果它是非活动的，函数将其启用。最后，函数调用 randomize 方法为变量 source_value 生成一个新的随机值。
+
+constraint_mode() 方法是内置的，不能被覆盖。
+
+## 18.10 动态约束修改
+有几种方法可以动态修改随机化约束，如下：
+ - 蕴含和 `if-else` 风格约束允许声明谓词约束。
+ - 使用 constraint_mode() 内置方法可以使约束块处于活动或非活动状态。最初，所有约束块都是活动的。非活动约束块在调用 randomize() 方法时被求解器忽略。
+ - 使用 rand_mode() 内置方法可以使随机变量处于活动或非活动状态。最初，所有 `rand` 和 `randc` 变量都是活动的。非活动变量在调用 randomize() 方法时不会被随机化，它们的值被求解器视为状态变量。
+ - 可以更改 `dist` 约束中的权重，影响选择集中特定值的概率。
+
+## 18.11 内联随机变量控制
+randomize() 方法可用于临时控制类实例或对象中的随机和状态变量集。当不带参数调用 randomize 方法时，它的行为如前面的子条款中所述，即为对象中的所有随机变量（声明为 rand 或 randc）分配新值，以便满足所有约束。当使用参数调用 randomize 时，这些参数指定该对象中的所有随机变量的完整集；所有其他变量在对象中被视为状态变量。例如，考虑以下类和调用 randomize 的示例：
+```verilog
+class CA;
+    rand byte x, y;
+    byte v, w;
+    constraint c1 { x < v && y > w; }
+endclass
+
+CA a = new;
+
+a.randomize(); // 随机变量：x, y 状态变量：v, w
+a.randomize( x ); // 随机变量：x 状态变量：y, v, w
+a.randomize( v, w ); // 随机变量：v, w 状态变量：x, y
+a.randomize( w, x ); // 随机变量：w, x 状态变量：y, v
+```
+
+这种机制控制了 randomize() 方法的活动随机变量集，这在概念上等同于对 rand_mode() 方法进行一组调用，以禁用或启用相应的随机变量。使用参数调用 randomize() 允许更改任何类属性的随机模式，即使这些属性未声明为 `rand` 或 `randc`。这种机制不会影响周期性随机模式；它不能将非随机变量更改为周期性随机变量（`randc`）并且不能将周期性随机变量更改为非周期性随机变量（从 `randc` 更改为 `rand`）。
+
+randomize 方法的参数范围是对象类。参数限于调用对象的属性名称；不允许表达式。只有在调用 randomize 的范围内才能更改局部类成员的随机模式，也就是在声明局部成员的类的范围内。
+
+### 18.11.1 内联约束检查器
+通常，调用没有随机变量的类的 randomize 方法会导致该方法表现为检查器。换句话说，它不分配随机值，只返回状态：如果所有约束都满足，则返回 1，否则返回 0。内联随机变量控制机制也可以用于强制 randomize() 方法表现为检查器。
+
+randomize 方法接受特殊参数 `null`，表示在调用期间没有随机变量。换句话说，所有类成员都被视为状态变量。这使得 randomize 方法表现为检查器而不是生成器。检查器评估所有约束，并且如果所有约束都满足，则只返回 1，否则返回 0。例如，如果之前定义的类 CA 执行以下调用：
+```verilog
+success = a.randomize( null ); // 没有随机变量
+```
+
+然后求解器将所有变量视为状态变量，并且只检查约束是否满足，即，使用 x、y、v 和 w 的当前值检查关系 (x < v && y > w) 是否为真。
+
+## 18.12 随机化范围变量——std::randomize()
+内置类 randomize 方法仅对类成员变量操作。使用类来建模要随机化的数据是一种强大的机制，它允许创建包含随机变量和约束的通用、可重用的对象，这些对象可以稍后扩展、继承、约束、覆盖、启用、禁用，并与其他对象合并或分离。类和相关随机变量和约束的易于操作性使类成为描述和操作随机数据和约束的理想工具。然而，一些不需要类的完整灵活性的问题可以使用更简单的机制来随机化不属于类的数据。作用域 randomize 函数 std::randomize() 允许用户在不需要定义类或实例化类对象的情况下在当前作用域中随机化数据。
+
+作用域 randomize 函数的语法如下 18-11：
+---
+```verilog
+scope_randomize ::= 
+[ std:: ] randomize ( [ variable_identifier_list ] ) [ with constraint_block ] 
+```
+---
+语法 18-11—作用域 randomize 函数语法（不在附录 A 中）
+
+作用域 randomize 函数的行为与类 randomize 方法完全相同，只是它操作当前作用域中的变量而不是类成员变量。作为参数传递给此函数的变量指定要分配随机值的变量，即随机变量。
+
+例如：
+```verilog
+module stim;
+    bit [15:0] addr;
+    bit [31:0] data;
+    function bit gen_stim();
+        bit success, rd_wr;
+        success = randomize( addr, data, rd_wr ); // 调用 std::randomize
+        return rd_wr;
+    endfunction
+    ...
+endmodule
+```
+
+函数 gen_stim 使用三个变量 addr、data 和 rd_wr 作为参数调用 std::randomize()。因此，std::randomize() 为 gen_stim 函数作用域中可见的变量分配新的随机变量。在上面的示例中，addr 和 data 具有模块作用域，而 rd_wr 具有函数作用域。上面的示例也可以使用类编写：
+```verilog
+class stimc;
+    rand bit [15:0] addr;
+    rand bit [31:0] data;
+    rand bit rd_wr;
+endclass
+
+function bit gen_stim( stimc p );
+    bit [15:0] addr;
+    bit [31:0] data;
+    bit success;
+    success = p.randomize();
+    addr = p.addr;
+    data = p.data;
+    return p.rd_wr;
+endfunction
+```
+
+然而，对于这种简单的应用，作用域 randomize 函数导致了一个直接的实现。
+
+作用域 randomize 函数在成功设置所有随机变量为有效值时返回 1；否则，返回 0。如果调用作用域 randomize 函数时没有参数，则不会更改任何变量的值，而是检查其约束。将评估其约束块中的所有约束表达式，如果其中一个或多个表达式计算为 false（0），则 randomize 调用将返回 0；否则，返回 1。
+
+### 18.12.1 向作用域变量添加约束——std::randomize() with
+作用域 randomize 函数的 std::randomize() with 形式允许用户为局部作用域变量指定随机约束。当指定约束时，作用域 randomize 函数的参数变为随机变量；所有其他变量被视为状态变量。
+```verilog
+task stimulus( int length );
+    int a, b, c, success;
+    success = std::randomize( a, b, c ) with { a < b ; a + b < length ; }; 
+    ...
+    success = std::randomize( a, b ) with { b - a > length ; }; 
+    ...
+endtask
+```
+
+上面的任务 stimulus 在其局部变量 a、b 和 c 上调用 std::randomize 两次，为其局部变量 a、b 和 c 生成两组随机值。在第一次调用中，变量 a 和 b 被约束，使得变量 a 小于 b，它们的和小于任务参数 length，该参数被指定为状态变量。在第二次调用中，变量 a 和 b 被约束，使得它们的差大于状态变量 length。
+
+
+
 
