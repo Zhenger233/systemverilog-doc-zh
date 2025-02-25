@@ -1374,6 +1374,622 @@ endtask
 
 上面的任务 stimulus 在其局部变量 a、b 和 c 上调用 std::randomize 两次，为其局部变量 a、b 和 c 生成两组随机值。在第一次调用中，变量 a 和 b 被约束，使得变量 a 小于 b，它们的和小于任务参数 length，该参数被指定为状态变量。在第二次调用中，变量 a 和 b 被约束，使得它们的差大于状态变量 length。
 
+## 18.13 随机数系统函数和方法
+### 18.13.1 $urandom
+系统函数 $urandom 提供了生成伪随机数的机制。该函数每次调用时返回一个新的 32 位随机数。该数应为无符号数。
 
+$urandom 的语法如下：
+```verilog
+function int unsigned $urandom [ (int seed ) ] ;
+```
 
+seed 是一个可选参数，用于确定生成的随机数序列。种子可以是任何整数表达式。随机数生成器（RNG）将生成相同的随机数序列，每次使用相同的种子。
 
+RNG 是确定性的。每次程序执行时，它都会循环通过相同的随机序列。通过使用外部随机变量（例如时间）对 $urandom 函数进行种子化，可以使该序列变得非确定性。
+
+例如：
+```verilog
+bit [64:1] addr;
+bit [ 3:0] number;
+
+addr[32:1] = $urandom( 254 ); // 初始化生成器，获取 32 位随机数
+
+addr = {$urandom, $urandom }; // 64 位随机数
+number = $urandom & 15; // 4 位随机数
+```
+
+### 18.13.2 $urandom_range()
+$urandom_range() 函数返回指定范围内的无符号整数。
+
+$urandom_range() 的语法如下：
+```verilog
+function int unsigned $urandom_range( int unsigned maxval, int unsigned minval = 0 );
+```
+
+该函数将返回 maxval ... minval 范围内的无符号整数。
+
+例 1：
+```verilog
+val = $urandom_range(7,0);
+```
+
+如果省略 minval，则函数将返回 maxval ... 0 范围内的值。
+
+例 2：
+```verilog
+val = $urandom_range(7);
+```
+
+如果 maxval 小于 minval，则自动反转参数，使第一个参数大于第二个参数。
+
+例 3：
+```verilog
+val = $urandom_range(0,7);
+```
+
+所有三个前面的例子都产生 0 到 7（包括）范围内的值。
+
+$urandom_range() 自动线程稳定（参见 18.14.2）。
+
+### 18.13.3 srandom()
+srandom() 方法允许手动种子对象或线程的 RNG。可以使用进程的 srandom() 方法（参见 9.7）来种子进程的 RNG。
+
+srandom() 方法的原型如下：
+```verilog
+function void srandom( int seed );
+```
+
+srandom() 方法使用给定种子的值初始化对象的 RNG。
+
+### 18.13.4 get_randstate()
+get_randstate() 方法检索对象的 RNG 的当前状态。使用进程的 get_randstate() 方法（参见 9.7）检索与进程关联的 RNG 的状态。
+
+get_randstate() 方法的原型如下：
+```verilog
+function string get_randstate();
+```
+
+get_randstate() 方法返回与给定对象关联的 RNG 的内部状态的副本。
+
+RNG 状态是一个长度和格式未指定的字符串。字符串的长度和内容是实现相关的。
+
+### 18.13.5 set_randstate()
+set_randstate() 方法设置对象的 RNG 的状态。使用进程的 set_randstate() 方法（参见 9.7）设置与进程关联的 RNG 的状态。
+
+set_randstate() 方法的原型如下：
+```verilog
+function void set_randstate( string state );
+```
+
+set_randstate() 方法将给定状态复制到对象的 RNG 的内部状态中。
+
+RNG 状态是一个长度和格式未指定的字符串。使用不是从 get_randstate() 或不同实现的 get_randstate() 获得的字符串值调用 set_randstate() 是未定义的。
+
+## 18.14 随机稳定性
+RNG 是本地化到线程和对象的。因为由线程或对象返回的随机值序列与其他线程或对象的 RNG 独立，所以这个属性被称为 *随机稳定性*。随机稳定性适用于以下情况：
+ - 系统随机化调用，$urandom() 和 $urandom_range()
+ - 对象和进程随机种子方法，srandom()
+ - 对象随机化方法，randomize()
+
+具有此特性的测试台在用户代码的小改动面前表现出更稳定的 RNG 行为。此外，它允许通过手动种子线程和对象来更精确地控制随机值的生成。
+
+### 18.14.1 随机稳定性属性
+随机稳定性包括以下属性：
+ - *初始化 RNG*。每个模块实例、接口实例、程序实例和包都有一个初始化 RNG。每个初始化 RNG 都使用默认种子进行种子化。默认种子是一个实现相关的值。初始化 RNG 应用于创建静态进程和静态初始化程序（参见下面的列表项）。静态进程在附录 P 中定义。
+ - *线程稳定性*。每个线程对该线程中调用的所有随机化系统调用都有一个独立的 RNG。当创建新的动态线程时，其 RNG 从其父线程中获取下一个随机值作为种子。此属性称为 *层次种子化*。当创建静态进程时，其 RNG 从包含线程声明的模块实例、接口实例、程序实例或包的初始化 RNG 中获取下一个值进行种子化。
+   程序和线程稳定性可以在线程创建和随机数生成与以前相同的顺序时实现。当向现有测试添加新线程时，可以将其添加到代码块的末尾，以保持先前创建的工作的随机数稳定性。
+ - *对象稳定性*。每个类实例（对象）对该类中的所有随机化方法都有一个独立的 RNG。当使用 new 创建对象时，其 RNG 从创建对象的线程中获取下一个随机值作为种子。当使用静态声明初始化类对象时，没有活动线程；因此，创建对象的 RNG 从包含声明的模块实例、接口实例、程序实例或包的初始化 RNG 中获取下一个随机值进行种子化。
+   对象稳定性应在对象和线程创建和随机数生成与以前相同的顺序时保持。为了保持随机数稳定性，可以在创建现有对象之后创建新对象、线程和随机数。
+ - *手动种子化*。所有非初始化 RNG 都可以手动种子化。结合层次种子化，此功能允许用户仅使用子系统（层次子树）的根线程上的单个种子完全定义子系统的操作。
+
+### 18.14.2 线程稳定性
+`$urandom` 系统调用返回的随机数值独立于线程执行顺序。例如：
+```verilog
+integer x, y, z;
+fork // 在线程开始时设置种子
+    begin process::self.srandom(100); x = $urandom; end
+    // 在线程中设置种子
+    begin y = $urandom; process::self.srandom(200); end
+    // 从线程 RNG 中获取 2 个值
+    begin z = $urandom + $urandom; end
+join
+```
+
+上面的程序片段说明了以下几个属性：
+ - *线程局部性*。返回的 x、y 和 z 值与线程执行顺序无关。这是一个重要的属性，因为它允许开发独立、可控和可预测的子系统。
+ - *层次种子化*。当创建线程时，其随机状态使用父线程的下一个随机值作为种子进行初始化。三个 fork 线程都是从父线程种子化的。
+
+每个线程使用唯一的值进行种子化，该值仅由其父线程确定。线程执行子树的根确定其子树的随机种子。这允许整个子树被移动并通过手动种子化其根线程来保持其行为。
+
+### 18.14.3 对象稳定性
+每个类内部构建的 randomize() 方法展现出对象稳定性。这是在每个实例内的 randomize() 调用独立于其他实例，并且独立于其他随机化函数调用的属性。
+
+例如：
+```verilog
+class C1;
+    rand integer x;
+endclass
+
+class C2;
+    rand integer y;
+endclass
+
+initial begin
+    C1 c1 = new();
+    C2 c2 = new();
+    integer z;
+    void'(c1.randomize());
+    // z = $random;
+    void'(c2.randomize());
+end
+```
+
+ - c1.x 和 c2.y 的返回值是相互独立的。
+ - randomize() 调用是独立于 $random 系统调用的。如果取消注释上面的 z = $random 行，则分配给 c1.x 和 c2.y 的值不会改变。
+ - 每个实例都有一个独特的随机值来源，可以独立地进行种子化。该随机种子是在创建实例时从父线程中获取的。
+ - 对象可以在任何时候使用 srandom() 方法进行种子化。
+   ```verilog
+   class C3
+       function new (integer seed);
+           // 为此实例设置一个新种子
+           this.srandom(seed);
+       endfunction
+   endclass
+   ```
+
+一旦对象被创建，就不能保证创建线程可以在另一个线程访问对象之前更改对象的随机状态。因此，最好在 new 方法内部进行对象的自我种子化，而不是在外部。
+
+对象的种子可以从任何线程设置。但是，线程的种子只能从线程内部设置。
+
+## 18.15 手动种子化随机
+每个对象保留其自己的内部 RNG，用于它的 randomize() 方法单独使用。这允许对象互相独立地随机化，并且与其他系统随机化函数的调用独立。当对象被创建时，其 RNG 从创建对象的线程中获取下一个随机值作为种子。这种过程称为 *层次对象种子化*。
+
+有时期望手动种子化对象的 RNG。这可以通过调用对象的 srandom() 方法来实现。这也可以在在类方法内或类定义外部实现：
+
+一个在内部设置 RNG 种子的实例，作为类方法，如下所示：
+```verilog
+class Packet;
+    rand bit[15:0] header;
+    ...
+    function new (int seed);
+        this.srandom(seed);
+        ...
+    endfunction
+endclass
+```
+
+一个在外部设置 RNG 种子的实例，如下所示：
+```verilog
+Packet p = new(200); // 使用种子 200 创建 p
+p.srandom(300); // 使用种子 300 重新设置 p
+```
+
+在对象的 new() 函数中调用 srandom() 方法确保对象的 RNG 在任何类成员值被随机化之前使用新种子设置。
+
+## 18.16 随机加权 case 语句——randcase
+---
+```verilog
+statement_item ::= // from A.6.4
+...
+| randcase_statement 
+randcase_statement ::= // from A.6.7
+randcase randcase_item { randcase_item } endcase
+randcase_item ::= expression : statement_or_null
+```
+---
+语法 18-12—Randcase 语法（摘自附录 A）
+
+关键字 `randcase` 引入一个 `case` 语句，它随机选择其分支之一。randcase_item 表达式是构成分支权重的非负整数值。一个条目的权重除以所有权重的总和给出采取该分支的概率。例如：
+```verilog
+randcase
+  3 : x = 1;
+  1 : x = 2;
+  4 : x = 3;
+endcase
+```
+
+所有权重的总和是 8；因此，采取第一个分支的概率是 0.375，采取第二个分支的概率是 0.125，采取第三个分支的概率是 0.5。
+
+如果一个分支指定了零权重，那么该分支不会被采取。如果所有 randcase_items 指定了零权重，那么没有分支被采取，并且可以发出警告。
+
+randcase 权重可以是任意表达式，而不仅仅是常量。例如：
+```verilog
+byte a, b;
+
+randcase
+  a + b : x = 1;
+  a - b : x = 2;
+  a ^ ~b : x = 3;
+  12'b800 : x = 4;
+endcase
+```
+
+每个权重表达式的精度是自决的。权重的总和使用标准加法语义（所有权重的最大精度）计算，其中每个加数是无符号的。每个权重表达式最多计算一次（实现可以缓存相同的表达式）以未指定的顺序。在前面的示例中，前三个权重表达式使用 8 位精度计算，第四个表达式使用 12 位精度计算。结果权重作为无符号值使用 12 位精度相加。然后使用无符号 12 位比较选择权重。
+
+每次调用 `randcase` 从 0 到权重总和中检索一个随机数。然后按声明顺序选择权重：较小的随机数对应于第一个（顶部）权重语句。
+
+randcase 语句表现出线程稳定性。随机数是从 $urandom_range() 获取的；因此，绘制的随机值与线程执行顺序无关。这可能导致多次调用 $urandom_range() 来处理大于 32 位的值。
+
+## 18.17 随机序列生成——randsequence
+解析器生成器（如 yacc）使用 BNF 或类似的表示法来描述要解析的语言的语法。语法用于生成一个程序，该程序能够检查一系列标记是否表示该语言的语法正确的话语。SystemVerilog 的序列生成器颠倒了这个过程。它使用语法随机创建一个正确的语法描述语言的话语（即一系列标记）。随机序列生成器对于随机生成结构化激励序列（如指令或网络流量模式）非常有用。
+
+序列生成器使用一组规则和在 `randsequence` 块中的产生。`randsequence` 块的语法如下 18-13：
+---
+```verilog
+statement_item ::= // from A.6.4
+...
+| randsequence_statement 
+randsequence_statement ::= randsequence ( [ production_ identifier ] ) // from A.6.12
+production { production } 
+endsequence
+production ::= [ data_type_or_void ] production_identifier [ ( tf_port_list ) ] : rs_rule { | rs_rule } ;
+rs_rule ::= rs_production_list [ := weight_specification [ rs_code_block ] ] 
+rs_production_list ::= 
+rs_prod { rs_prod } 
+| rand join [ ( expression ) ] production_item production_item { production_item } 
+weight_specification ::= 
+integral_number 
+| ps_identifier 
+| ( expression )
+rs_code_block ::= { { data_declaration } { statement_or_null } }
+rs_prod ::= 
+production_item 
+| rs_code_block 
+| rs_if_else 
+| rs_repeat 
+| rs_case 
+production_item ::= production_identifier [ ( list_of_arguments ) ]
+rs_if_else ::= if ( expression ) production_item [ else production_item ] 
+rs_repeat ::= repeat ( expression ) production_item 
+rs_case ::= case ( case_expression ) rs_case_item { rs_case_item } endcase
+rs_case_item ::= 
+case_item_expression { , case_item_expression } : production_item ;
+| default [ : ] production_item ;
+case_expression ::= expression // from A.6.7
+case_item_expression ::= expression 
+```
+---
+语法 18-13—Randsequence 语法（摘自附录 A）
+
+`randsequence` 语法由一个或多个产生组成。每个产生包含一个名称和一个产生项列表。产生项进一步分为终结符和非终结符。非终结符以终结符和其他非终结符定义。终结符在其关联的代码块之外不需要进一步定义。最终，每个非终结符都被分解为其终结符。产生列表包含一系列产生项，指示这些项必须按顺序流式传输。单个产生可以包含多个由 `|` 符号分隔的产生列表。用 `|` 分隔的产生列表意味着生成器将随机选择。
+
+一个简单的例子说明了基本概念：
+```verilog
+randsequence( main )
+    main : first second done ;
+    first : add | dec ;
+    second : pop | push ;
+    done : { $display("done"); } ;
+    add : { $display("add"); } ;
+    dec : { $display("dec"); } ;
+    pop : { $display("pop"); } ;
+    push : { $display("push"); } ;
+endsequence
+```
+
+产生 main 以三个非终结符 first、second 和 done 定义。当选择 main 时，它生成序列 first、second 和 done。当生成 first 产生时，它被分解为其产生，该产生指定在 add 和 dec 之间进行随机选择。类似地，第二个产生指定在 pop 和 push 之间进行选择。所有其他产生都是终结符；它们完全由其代码块指定，该代码块显示产生名称。因此，语法导致以下可能的结果：
+ - add pop done
+ - add push done
+ - dec pop done
+ - dec push done
+
+当执行 `randsequence` 语句时，它生成一个由语法驱动的随机产生流。随着生成每个产生，执行其关联代码块的副作用产生所需的激励。除了基本语法外，序列生成器还提供随机权重、交错和其他控制机制。虽然 `randsequence` 语句本身不会创建循环，但递归产生将导致循环。
+
+`randsequence` 语句创建一个自动作用域。所有产生标识符都是局部范围的。此外，`randsequence` 块中的每个代码块都创建一个匿名自动范围。不允许对在代码块中声明的变量进行层次引用。要声明静态变量，应使用 `static` 前缀。`randsequence` 关键字后面可以跟一个可选的产生名称（括号内），该名称指定顶级产生的名称。如果未指定，则第一个产生成为顶级产生。
+
+### 18.17.1 随机产生权重
+可以通过为产生列表分配权重来更改生成产生的概率。特定产生列表的概率与其指定的权重成正比。
+---
+```verilog
+production ::= // from A.6.12
+[ data_type_or_void ] production_identifier [ ( tf_port_list ) ] : rs_rule { | rs_rule } ;
+rs_rule ::= rs_production_list [ := weight_specification [ rs_code_block ] ] 
+```
+---
+语法 18-14—随机产生权重语法（摘自附录 A）
+
+`:=` 运算符将 weight_specification 指定的权重分配给其产生列表。weight_specification 应计算为非负整数值。当分配给替代产生时，权重才有意义，即由 `|` 分隔的产生列表。权重表达式在选择其封闭产生时进行评估，从而允许权重动态更改。例如，前面示例的第一个产生可以重写为：
+```verilog
+first : add := 3
+| dec := (1 + 1) // 2
+;
+```
+
+这将使用两个加权产生列表 add 和 dec 定义产生 first。产生 add 将以 60% 的概率生成，产生 dec 将以 40% 的概率生成。
+
+如果未指定权重，则产生将使用权重 1。如果只指定了一些权重，则未指定的权重将使用权重 1。
+
+### 18.17.2 if-else 产生语句
+通过 `if-else` 产生语句，可以有条件地生成产生。`if-else` 产生语句的语法如下 18-15：
+---
+```verilog
+rs_if_else ::= if ( expression ) production_item [ else production_item ] // from A.6.12
+```
+---
+语法 18-15—If-else 条件随机产生语法（摘自附录 A）
+
+表达式可以是任何计算为布尔值的表达式。如果表达式计算为 true，则生成表达式后面的产生；否则生成可选 else 语句后面的产生。例如：
+```verilog
+randsequence()
+    ...
+    PP_PO : if ( depth < 2 ) PUSH else POP ;
+    PUSH : { ++depth; do_push(); };
+    POP : { --depth; do_pop(); };
+endsequence
+```
+
+这个例子定义了产生 PP_OP。如果变量 depth 小于 2，则生成产生 PUSH。否则生成产生 POP。变量 depth 由 PUSH 和 POP 产生的代码块更新。
+
+### 18.17.3 Case 产生语句
+通过 `case` 产生语句，可以从一组备选项中选择产生。`case` 产生语句的语法如下 18-16：
+---
+```verilog
+rs_case ::= case ( case_expression ) rs_case_item { rs_case_item } endcase // from A.6.12
+rs_case_item ::= 
+case_item_expression { , case_item_expression } : production_item ;
+| default [ : ] production_item ;
+case_expression ::= expression // from A.6.7
+case_item_expression ::= expression 
+```
+---
+语法 18-16—Case 产生语句语法（摘自附录 A）
+
+`case` 产生语句类似于过程性 `case` 语句，除了以下几点。case_expression 被评估，并且它的值与每个 case_item_expression 的值进行比较。生成的产生是与 case_expression 匹配的第一个 case_item_expression 关联的产生。如果没有找到匹配的 case_item_expression，则生成与可选 default 项关联的产生，或者如果没有 default 项，则不生成任何内容。在一个 case 产生语句中多个 default 语句是非法的。通过逗号分隔的 case_item_expression 允许多个表达式共享产生。例如：
+```verilog
+randsequence()
+    SELECT : case ( device & 7 )
+    0 : NETWORK ; 
+    1, 2 : DISK ; 
+    default : MEMORY ;
+    endcase ;
+    ...
+endsequence
+```
+
+这个例子定义了产生 SELECT，其中包含一个 case 语句。case_expression (device & 7) 被评估并与两个 case_item_expression 进行比较。如果表达式匹配 0，则生成产生 NETWORK；如果匹配 1 或 2，则生成产生 DISK。否则生成产生 MEMORY。
+
+### 18.17.4 Repeat 产生语句
+`repeat` 产生语句用于迭代产生指定次数的产生。`repeat` 产生语句的语法如下 18-17：
+---
+```verilog
+rs_repeat ::= repeat ( expression ) production_item // from A.6.12
+```
+---
+语法 18-17—Repeat 随机产生语法（摘自附录 A）
+
+表达式应计算为非负整数值。该值指定生成产生的次数。例如：
+```verilog
+randsequence()
+    ...
+    PUSH_OPER : repeat( $urandom_range( 2, 6 ) ) PUSH ;
+    PUSH : ...
+endsequence
+```
+
+在这个例子中，PUSH_OPER 产生指定 PUSH 产生的随机次数（2 到 6 次），具体取决于 $urandom_range() 返回的值。
+
+`repeat` 产生语句本身不能被提前终止。`break` 语句将终止整个 `randsequence` 块（参见 18.17.6）。
+
+### 18.17.5 交错产生——rand join
+`rand join` 产生控制用于在保持每个序列的相对顺序的同时随机交错两个或多个产生序列。`rand join` 产生控制的语法如下 18-18：
+---
+```verilog
+rs_production_list ::= // from A.6.12
+rs_prod { rs_prod }
+| rand join [ ( expression ) ] production_item production_item { production_item }
+```
+---
+语法 18-18—Rand join 随机产生语法（摘自附录 A）
+
+例如：
+```verilog
+randsequence( TOP )
+    TOP : rand join S1 S2 ;
+    S1 : A B ;
+    S2 : C D ;
+endsequence
+```
+
+生成器将随机生成以下序列：
+ - A B C D
+ - A C B D
+ - A C D B
+ - C D A B
+ - C A B D
+ - C A D B
+
+`rand join` 关键字后面可以跟一个实数，范围为 0.0 到 1.0。该表达式的值表示要交错的序列的长度如何影响选择序列的概率。序列的长度是在给定时间内尚未交错的产生数量。如果表达式为 0.0，则最短序列优先。如果表达式为 1.0，则最长序列优先。例如，使用前面的示例：
+```verilog
+TOP : rand join (0.0) S1 S2 ;
+```
+
+将优先选择序列：A B C D    C D A B，并且
+```verilog
+TOP : rand join (1.0) S1 S2 ;
+```
+
+将优先选择序列：A C B D    A C D B    C A B D    C A D B。
+
+如果未指定，则生成器使用默认值 0.5，不优先任何序列长度。
+
+在每一步，生成器将非终结符符号交错到深度 1。
+
+### 18.17.6 中止产生——break 和 return
+两个过程性语句可用于提前终止产生：`break` 和 `return`。这两个语句可以出现在任何代码块中；它们在退出的范围方面有所不同。
+
+`break` 语句终止序列生成。当 `break` 语句在产生代码块中执行时，它强制跳出 randsequence 块。例如：
+```verilog
+randsequence()
+    WRITE : SETUP DATA ;
+    SETUP : { if( fifo_length >= max_length ) break; } COMMAND ;
+    DATA : ...
+endsequence
+next_statement : ...
+```
+
+在前面的示例中，如果 SETUP 产生中执行 `break` 语句，则不会生成 COMMAND，并且执行将继续在标记为 next_statement 的行上。循环语句中使用 `break` 语句的行为如 12.8 中所定义。因此，`break` 语句终止最小的封闭循环语句；否则，它终止 randsequence 块。
+
+`return` 语句中止当前产生。当 `return` 语句在产生代码块中执行时，当前产生被中止。序列生成将继续生成中止产生后的下一个产生。例如：
+```verilog
+randsequence()
+    TOP : P1 P2 ;
+    P1 : A B C ;
+    P2 : A { if( flag == 1 ) return; } B C ;
+    A : { $display( "A" ); } ;
+    B : { if( flag == 2 ) return; $display( "B" ); } ;
+    C : { $display( "C" ); } ;
+endsequence
+```
+
+根据变量 flag 的值，上面的示例显示以下内容：
+ - flag == 0 ==> A B C A B C
+ - flag == 1 ==> A B C A
+ - flag == 2 ==> A C A C
+
+当 flag == 1 时，产生 P2 在中间被中止，生成 A。当 flag == 2 时，产生 B 被两次中止（一次作为 P1 的一部分，一次作为 P2 的一部分）；然而，每次生成都继续生成下一个产生 C。
+
+### 18.17.7 产生之间的值传递
+数据可以在要生成的产生之间传递，生成的产生可以将数据返回给触发其生成的非终结符。传递数据给产生类似于任务调用，并使用相同的语法。从产生返回数据需要为产生声明一个类型，该类型使用类似于函数声明的语法。
+
+接受数据的产生包括一个形式参数列表。声明产生参数的语法类似于任务原型；将数据传递给产生的语法与任务调用相同（参见语法 18-19）。
+---
+```verilog
+production ::= 
+[ data_type_or_void ] production_identifier [ ( tf_port_list ) ] : rs_rule { | rs_rule } ; // from A.6.12
+```
+---
+语法 18-19—随机产生语法（摘自附录 A）
+
+例如，上面的第一个示例可以写成：
+```verilog
+randsequence( main )
+    main : first second gen ;
+    first : add | dec ;
+    second : pop | push ;
+    add : gen("add") ;
+    dec : gen("dec") ;
+    pop : gen("pop") ;
+    push : gen("push") ;
+    gen( string s = "done" ) : { $display( s ); } ;
+endsequence
+```
+
+在这个例子中，产生 gen 接受一个字符串参数，其默认值为 "done"。另外五个产生生成这个产生，每个产生都有一个不同的参数（main 中的产生使用默认值）。
+
+产生创建一个作用域，该作用域包含其所有规则和代码块。因此，传递给产生的参数在整个产生中都可用。
+
+返回数据的产生需要声明一个类型。未指定返回类型的产生应假定为 void 返回类型。
+
+通过使用带有表达式的 return 语句返回值。当 return 语句与返回值的产生一起使用时，应指定正确类型的表达式，就像非 void 函数一样。return 语句将给定的表达式分配给相应的产生。返回值可以在触发生成返回值的产生的非终结符的代码块中读取。在这些代码块中，返回值使用产生名称加上可选的索引表达式访问。
+
+在规则中，为每个返回值产生隐式声明一个变量。变量的类型由产生的返回类型和产生在规则中出现的次数确定。如果产生只出现一次，则隐式变量的类型是产生的返回类型。如果产生出现多次，则类型是一个数组，其中元素类型是产生的返回类型。数组从 1 到产生在规则中出现的次数进行索引。数组的元素根据产生的实例返回的值按照出现的语法顺序进行分配。
+
+例 1：
+```verilog
+randsequence( bin_op )
+    void bin_op : value operator value // void 类型是可选的
+    { $display("%s %b %b", operator, value[1], value[2]); }
+    ;
+    bit [7:0] value : { return $urandom; } ;
+    string operator : add := 5 { return "+" ; }
+    | dec := 2 { return "-" ; }
+    | mult := 1 { return "*" ; }
+    ;
+endsequence
+```
+
+在上面的示例中，operator 和 value 产生返回一个字符串和一个 8 位值，分别。产生 bin_op 包括这两个返回值产生。因此，与产生关联的代码块具有以下隐式变量声明：
+```verilog
+bit [7:0] value [1:2];
+string operator;
+```
+
+例 2：
+```verilog
+int cnt;
+...
+randsequence( A )
+    void A : A1 A2;
+    void A1 : { cnt = 1; } B repeat(5) C B 
+    { $display("c=%d, b1=%d, b2=%d", C, B[1], B[2]); }
+    ;
+    void A2 : if (cond) D(5) else D(20) 
+    { $display("d1=%d, d2=%d", D[1], D[2]); }
+    ;
+    int B : C { return C;}
+    | C C { return C[2]; }
+    | C C C { return C[3]; }
+    ;
+    int C : { cnt = cnt + 1; return cnt; };
+    int D (int prm) : { return prm; };
+endsequence
+```
+
+在例 2 中，产生 A1 的代码块具有以下隐式变量声明：
+```verilog
+int B[1:2];
+int C;
+```
+
+产生 A2 的代码块具有以下隐式变量声明：
+```verilog
+int D[1:2];
+```
+
+如果 cond 为 true，则第一个元素被赋予由 D(5) 返回的值。如果 cond 为 false，则第二个元素被赋予由 D(20) 返回的值。
+
+产生 B 的第一个规则的代码块具有以下隐式变量声明：
+```verilog
+int C;
+```
+
+产生 B 的第三个规则的代码块具有以下隐式变量声明：
+```verilog
+int C[1:3];
+```
+
+访问这些隐式变量会产生由相应产生返回的值。当执行上面的例子时，显示一个简单的三项随机序列：一个操作符，后面跟两个 8 位值。运算符 +、- 和 * 的选择概率分别为 5/8、2/8 和 1/8。
+
+只能访问已生成的产生返回的值。尝试读取尚未生成的产生返回的值会导致未定义的值。例如：
+```verilog
+X : A {int y = B;} B ; // 无效使用 B
+X : A {int y = A[2];} B A ; // 无效使用 A[2]
+X : A {int y = A;} B {int j = A + B;} ; // 有效
+```
+
+由 randsequence 生成的序列可以直接驱动系统，作为产生生成的副作用，或者可以生成整个序列以供将来处理。例如，以下函数生成并返回一个队列，该队列包含在其参数中指定的范围内的随机数。队列的第一个和最后一个队列项分别对应于下限和上限。此外，队列的大小根据产生权重随机选择。
+```verilog
+function int[$] GenQueue(int low, int high);
+    int[$] q;
+    randsequence()
+        TOP : BOUND(low) LIST BOUND(high) ;
+        LIST : LIST ITEM := 8 { q = { q, ITEM }; }
+        | ITEM := 2 { q = { q, ITEM }; }
+        ;
+        int ITEM : { return $urandom_range( low, high ); } ;
+        BOUND(int b) : { q = { q, b }; } ;
+    endsequence
+    GenQueue = q;
+endfunction
+```
+
+当在函数 GenQueue 中执行 randsequence 时，它生成 TOP 产生，导致生成三个产生：BOUND 与参数 low、LIST 和 BOUND 与参数 high。BOUND 产生简单地将其参数附加到队列。LIST 产生由加权 LIST ITEM 产生和 ITEM 产生组成。LIST ITEM 产生以 80% 的概率生成，这导致递归生成 LIST 产生，从而推迟 ITEM 产生的生成。每次生成 ITEM 产生时，它在指定范围内生成一个随机数，稍后附加到队列。
+
+以下示例使用 randsequence 块生成 DSL 数据包网络的随机流量：
+```verilog
+class DSL; ... endclass // 创建有效 DSL
+
+randsequence (STREAM)
+    STREAM : GAP DATA := 80
+    | DATA := 20 ;
+    DATA : PACKET(0) := 94 { transmit( PACKET ); }
+    | PACKET(1) := 6 { transmit( PACKET ); } ;
+    DSL PACKET (bit bad) : { DSL d = new;
+    if( bad ) d.crc ^= 23; // 损坏 crc
+    return d;
+    );
+    GAP: { ## {$urandom_range( 1, 20 )}; };
+endsequence
+```
+
+在这个例子中，流量由一系列（好和坏）数据包和间隔组成。第一个产生 STREAM 指定 80% 的时间流量由 GAP 后跟一些 DATA 组成，20% 的时间流量只由 DATA 组成（没有 GAP）。第二个产生 DATA 指定 94% 的所有数据包是好数据包，剩下的 6% 是坏数据包。PACKET 产生实现 DSL 数据包创建；如果产生参数为 1，则通过搅动有效的 DSL 数据包的 crc 来生成坏数据包。最后，GAP 产生实现传输间隔，等待 1 到 20 个周期之间的随机数量。
