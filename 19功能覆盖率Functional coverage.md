@@ -376,5 +376,186 @@ coverpoint b
 #### 19.5.1.2 使用 covergroup 表达式的覆盖点箱集
 set_covergroup_expression 语法允许指定生成一个数组的表达式，该数组定义了箱。任何元素类型与覆盖点类型兼容的数组都是允许的，但是不允许关联数组。在覆盖组中声明的标识符（例如覆盖点标识符和箱标识符）不可见。表达式在构造覆盖组实例时进行评估。
 
+### 19.5.2 指定转换的箱
+指定转换箱的语法（语法 19-3）接受 16.9 中描述的序列语法的子集：
+---
+```verilog
+bins_or_options ::= // from A.2.11
+coverage_option 
+| [ wildcard ] bins_keyword bin_identifier [ [ [ covergroup_expression ] ] ] =
+{ covergroup_range_list } [ with ( with_covergroup_expression ) ] 
+[ iff ( expression ) ] 
+| [ wildcard ] bins_keyword bin_identifier [ [ [ covergroup_expression ] ] ] =
+cover_point_identifier with ( with_covergroup_expression ) ] [ iff ( expression ) ] 
+| [ wildcard ] bins_keyword bin_identifier [ [ [ covergroup_expression ] ] ] =
+set_covergroup_expression [ iff ( expression ) ] 
+| [ wildcard] bins_keyword bin_identifier [ [ ] ] = trans_list [ iff ( expression ) ] 
+... 
+bins_keyword::= bins | illegal_bins | ignore_bins
+covergroup_range_list ::= covergroup_value_range { , covergroup_value_range } 
+trans_list ::= ( trans_set ) { , ( trans_set ) } 
+trans_set ::= trans_range_list { => trans_range_list } 
+trans_range_list ::= 
+trans_item 
+| trans_item [* repeat_range ]
+| trans_item [–> repeat_range ]
+| trans_item [= repeat_range ]
+trans_item ::= covergroup_range_list 
+repeat_range ::= 
+covergroup_expression 
+| covergroup_expression : covergroup_expression 
+```
+---
+语法 19-3—转换箱语法（摘自附录 A）
+
+trans_list 指定覆盖点的一个或多个有序值转换集。单个值转换如下所示：
+```verilog
+value1 => value2
+```
+
+它表示覆盖点在两个连续采样点的值，即 value1，后跟 value2 在下一个采样点。
+
+值转换序列表示如下：
+```verilog
+value1 => value3 => value4 => value5
+```
+
+在这种情况下，value1 后跟 value3，后跟 value4，后跟 value5。序列可以是任意长度的。
+
+一组转换可以如下所示：
+```verilog
+range_list1 => range_list2
+```
+
+此规范扩展为 range_list1 中的每个值与 range_list2 中的每个值之间的转换。例如：
+```verilog
+1,5 => 6, 7
+```
+
+指定了以下四个转换：
+`( 1=>6 ), ( 1=>7 ), ( 5=>6 ), ( 5=>7 )`
+
+使用连续重复的转换如
+```verilog
+trans_item [* repeat_range ]
+```
+
+这里，trans_item 重复 repeat_range 次。例如：
+```verilog
+3 [* 5]
+```
+
+与下面相同：
+```verilog
+3=>3=>3=>3=>3
+```
+
+重复范围的范例如下：
+```verilog
+3 [* 3:5]
+```
+
+与下面相同：
+```verilog
+( 3=>3=>3 ), ( 3=>3=>3=>3 ), ( 3=>3=>3=>3=>3 )
+```
+
+使用 `trans_item [-> repeat_range]` 指定 goto 重复。特定值的必需次数由 repeat_range 指定。在指定值的第一次出现之前，可以出现任意数量的采样点，每次出现指定值之间可以出现任意数量的采样点。跟随 goto 重复的转换必须紧跟在重复的最后一次出现之后。例如：
+```verilog
+3 [-> 3]
+```
+
+与下面相同：
+```verilog
+...=>3...=>3...=>3
+```
+
+这里的点（...）表示不包含值 3 的任何转换。
+
+跟随额外值的 goto 重复如下所示：
+```verilog
+1 => 3 [ -> 3] => 5
+```
+
+与下面相同：
+```verilog
+1...=>3...=>3...=>3 =>5
+```
+
+使用 `trans_item [= repeat_range]` 指定非连续重复。特定值的必需次数由 repeat_range 指定。在指定值的第一次出现之前，可以出现任意数量的采样点，每次出现指定值之间可以出现任意数量的采样点。跟随非连续重复的转换可以在重复的最后一次出现之后的任意数量的采样点之后发生。
+
+例如：
+```verilog
+3 [= 2]
+```
+
+与下面相同：
+```verilog
+...=>3...=>3
+```
+
+跟随额外值的非连续重复如下所示：
+```verilog
+1 => 3 [=2] => 6
+```
+
+与下面相同：
+```verilog
+1...=>3...=>3...=>6
+```
+
+trans_list 指定覆盖点的一个或多个有序值转换集。如果覆盖点的值转换序列与 trans_list 中的任何完整序列匹配，则相应箱的覆盖计数将递增。例如：
+```verilog
+bit [4:1] v_a;
+
+covergroup cg @(posedge clk);
+    coverpoint v_a
+    {
+        bins sa = (4 => 5 => 6), ([7:9],10=>11,12); 
+        bins sb[] = (4=> 5 => 6), ([7:9],10=>11,12);
+        bins sc = (12 => 3 [-> 1]); 
+        bins allother = default sequence ; 
+    }
+endgroup
+```
+
+上面的示例定义了三个转换覆盖箱。第一个 `bins` 构造将以下序列与箱 sa 关联：4=>5=>6，或 7=>11，8=>11，9=>11，10=>11，7=>12，8=>12，9=>12，10=>12。第二个 `bins` 构造将每个上述序列与一个独立的箱关联：sb[4=>5=>6]，...，sb[10=>12]。第三个 bins 构造将无界序列 12=>...=>3 与箱 sc 关联。当覆盖点的其他非默认序列转换箱不增加，并且没有其他先前的待处理转换箱时，箱 allother 将增加。例如，考虑以下采样值序列：
+```verilog
+4 5 7 11 8 12 2 2 3
+```
+
+箱 allother 会增加两次。箱 allother 在采样 7 时增加，因为 5=>7 导致待处理序列 4=>5=>6 与箱 sa 和 sb[4=>5=>6] 的匹配失败，并且没有其他先前的待处理序列或增加的箱。在采样 8 时，箱 allother 会增加，因为 11=>8 的转换没有增加任何其他箱，也没有其他先前的待处理序列。在 12=>2=>2 的转换中，箱 allother 不会增加，因为箱 sc 保持待处理状态。
+
+指定无界或不确定长度序列的转换不能与多个箱结合使用（[] 表示）。例如，转换 `3[=2]` 的长度，使用非连续重复，是无界的，可以在仿真期间变化。尝试使用这样的序列与多个箱结合将导致错误。
+
+转换箱增加，每当对应的覆盖点的值转换序列匹配完整序列时，即使序列重叠也是如此。例如，给出定义：
+```verilog
+covergroup sg @(posedge clk);
+    coverpoint v
+    {
+        bins b2 = ( 2 [-> 3:5] ); // 3 到 5 个非连续的 2
+        bins b3 = ( 3 [-> 3:5] ); // 3 到 5 个非连续的 3
+        bins b5 = ( 5 [* 3] ); // 3 个连续的 5
+        bins b6 = ( 1 => 3 [-> 4:6] => 1); // 1 后跟 4 到 6 个非连续的 3，紧接着是 1
+        bins b7 = ( 1 => 2 [= 3:6] => 5); // 1 后跟 3 到 6 个非连续的 2，随后是 5
+    }
+endgroup
+```
+
+给定覆盖点变量 v 的采样值序列：
+```verilog
+1 4 3 2 3 3 2 2 3 2 3 1 5 5 5 5 5 5
+```
+
+上面的序列导致第 8 个采样（3 个非连续的 2）增加转换箱 b2，第 6 个采样（3 个非连续的 3）增加转换箱 b3。同样，第 10 个采样增加转换箱 b2，第 9 和 11 个采样增加转换箱 b3。转换箱 b5 在第 15、16、17 和 18 个采样中增加。转换箱 b6 在第 12 个采样中增加。转换箱 b7 在第 13 个采样中增加。
+
+每个采样最多增加一个转换箱。在上面的示例中，第 10 个采样中，转换箱 b2 只增加一次（将 1 添加到箱计数中）。
+
+长度为 0 的转换箱规范是非法的。这些是包含单个 covergroup_value_range 的转换箱规范，例如 (0) 或 ([0:1])，或具有评估为 1 的 repeat_range 的单个 covergroup_value_range，例如 (0[*1]) 或 ([0:1][*1])。
+
+
+
+
+
 
 
